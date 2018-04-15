@@ -1,0 +1,13 @@
+[package]
+name = "modem"
+version = "0.1.0"
+authors = ["David Stainton <dstainton415@gmail.com>"]
+description = "message oriented noise based cryptographic link layer"
+keywords = ["cryptography", "noise", "network"]
+
+[dependencies]
+snow = "0.1.8-preview"
+
+[dev-dependencies]
+ecdh_wrapper = "0.0.0"
+rustc-serialize = "0.3.24"
