@@ -27,6 +27,7 @@ extern crate ecdh_wrapper;
 use snow::params::NoiseParams;
 use snow::NoiseBuilder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
+use super::error::SessionError;
 
 
 pub const NOISE_PARAMS: &'static str = "Noise_XX_25519_ChaChaPoly_BLAKE2b";
@@ -51,26 +52,37 @@ pub struct Session {
 pub struct SessionConfig {
     pub authenticator: Box<PeerAuthenticator>,
     pub authentication_key: PrivateKey,
-    pub peer_public_key: PublicKey,
+    pub peer_public_key: Option<PublicKey>,
     pub additional_data: Vec<u8>,
 }
 
 impl Session {
-    pub fn new(session_config: &SessionConfig, is_initiator: bool) -> Result<Session, snow::Error> {
+    pub fn new(session_config: &SessionConfig, is_initiator: bool) -> Result<Session, SessionError> {
         let _noise_params: NoiseParams = NOISE_PARAMS.parse().unwrap();
         let _server_builder: NoiseBuilder = NoiseBuilder::new(_noise_params);
         let _session: snow::Session;
         if is_initiator {
-            _session = _server_builder
+            if !session_config.peer_public_key.is_some() {
+                return Err(SessionError::NoPeerKeyError);
+            }
+            let _match = _server_builder
                 .local_private_key(&session_config.authentication_key.to_vec())
-                .remote_public_key(&session_config.peer_public_key.to_vec())
+                .remote_public_key(&(session_config.peer_public_key.expect("peer key")).to_vec())
                 .prologue(&PROLOGUE)
-                .build_initiator()?;
+                .build_initiator();
+            _session = match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::SessionCreateError),
+            };
         } else {
-            _session = _server_builder
+            let _match = _server_builder
                 .local_private_key(&session_config.authentication_key.to_vec())
                 .prologue(&PROLOGUE)
-                .build_responder()?;
+                .build_responder();
+            _session = match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::SessionCreateError),
+            };
         }
         let _s = Session {
             initiator: is_initiator,
