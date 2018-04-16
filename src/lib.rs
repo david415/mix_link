@@ -22,6 +22,9 @@
 // SOFTWARE.
 
 extern crate snow;
+extern crate ecdh_wrapper;
+
+pub mod session;
 
 
 #[cfg(test)]
