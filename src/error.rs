@@ -29,6 +29,10 @@ use std::fmt;
 pub enum SessionError {
     NoPeerKeyError,
     SessionCreateError,
+    InvalidStateError,
+    HandshakeError1,
+    HandshakeError2,
+    HandshakeError3,
 }
 
 impl fmt::Display for SessionError {
@@ -37,6 +41,10 @@ impl fmt::Display for SessionError {
         match *self {
             NoPeerKeyError => write!(f, "No peer key was supplied, error."),
             SessionCreateError => write!(f, "Failure creating session."),
+            InvalidStateError => write!(f, "Invalid session state error."),
+            HandshakeError1 => write!(f, "Error writing 1st handshake payload."),
+            HandshakeError2 => write!(f, "Error writing 2nd handshake payload."),
+            HandshakeError3 => write!(f, "Error writing 3rd handshake payload."),
         }
     }
 }
@@ -52,6 +60,10 @@ impl Error for SessionError {
         match *self {
             NoPeerKeyError => None,
             SessionCreateError => None,
+            InvalidStateError => None,
+            HandshakeError1 => None,
+            HandshakeError2 => None,
+            HandshakeError3 => None,
         }
     }
 }

@@ -12,3 +12,4 @@ ecdh_wrapper = "0.0.0"
 [dev-dependencies]
 ecdh_wrapper = "0.0.0"
 rustc-serialize = "0.3.24"
+mockstream = "0.0.3"
