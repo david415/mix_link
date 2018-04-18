@@ -39,6 +39,7 @@ const NOISE_MESSAGE_MAX_SIZE: usize = 65535;
 
 const NOISE_HANDSHAKE_MESSAGE1_SIZE: usize = 32;
 const NOISE_HANDSHAKE_MESSAGE2_SIZE: usize = 96;
+const NOISE_HANDSHAKE_MESSAGE3_SIZE: usize = 64;
 
 
 #[derive(PartialEq, Eq)]
@@ -129,33 +130,89 @@ impl Session {
 
     pub fn handshake(&mut self) -> Result<(), SessionError> {
         if self.initiator {
-            let _match = self.session.write_message(&[], &mut self._buf);
+            // client -> server
+            let _match = self.session.write_message(&PROLOGUE, &mut self._buf);
             let mut _len = match _match {
                 Ok(x) => x,
-                Err(_) => return Err(SessionError::HandshakeError1),
+                Err(_) => return Err(SessionError::ClientHandshakeNoise1Error),
             };
+            assert_eq!(NOISE_HANDSHAKE_MESSAGE1_SIZE, _len);
+
+            let mut _match = self.conn_write.as_mut().unwrap().write_all(&self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE]);
+            match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ClientHandshakeSend1Error),
+            };
+
+            // client <- server
+            let _match = self.conn_read.as_mut().unwrap().read(&mut self._buf);
+            _len = match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ClientHandshakeReceiveError),
+            };
+            assert_eq!(NOISE_HANDSHAKE_MESSAGE2_SIZE, _len);
+
+            let _match = self.session.read_message(&self._buf[..NOISE_HANDSHAKE_MESSAGE2_SIZE], &mut self._payload);
+            _len = match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ClientHandshakeNoise2Error),
+            };
+            assert_eq!(NOISE_HANDSHAKE_MESSAGE2_SIZE, _len);
+
+            // client -> server
+            let _match = self.session.write_message(&[], &mut self._payload);
+            _len = match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ClientHandshakeNoise3Error),
+            };
+            assert_eq!(NOISE_HANDSHAKE_MESSAGE3_SIZE, _len);
             let mut _match = self.conn_write.as_mut().unwrap().write_all(&self._buf[.._len]);
             match _match {
                 Ok(x) => x,
-                Err(_) => return Err(SessionError::HandshakeError2),
+                Err(_) => return Err(SessionError::ClientHandshakeSend2Error),
+            };
+        } else {
+            // server <-
+            let _match = self.conn_read.as_mut().unwrap().read_exact(&mut self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE]);
+            match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ServerHandshakeReceive1Error),
             };
 
-            _len = self.conn_read.as_mut().unwrap().read(&mut self._buf).unwrap();
-            println!("client read {} bytes", _len);
-            //let _len = self.session.read_message(&self._buf[..NOISE_HANDSHAKE_MESSAGE2_SIZE], &mut self._payload).unwrap();
+            let _match = self.session.read_message(&self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE], &mut self._payload);
+            let mut _len = match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ServerHandshakeNoise1Error),
+            };
+            assert_eq!(NOISE_HANDSHAKE_MESSAGE1_SIZE, _len);
 
+            // server ->
+            let _match = self.session.write_message(&[], &mut self._payload);
+            let mut _len = match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ServerHandshakeNoise2Error),
+            };
+            assert_eq!(NOISE_HANDSHAKE_MESSAGE2_SIZE, _len);
 
-        } else {
-            if !self.conn_read.as_mut().is_some() {
-                return Err(SessionError::HandshakeError3);
-            }
+            let _match = self.conn_write.as_mut().unwrap().write_all(&self._payload[..NOISE_HANDSHAKE_MESSAGE3_SIZE]);
+            match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ServerHandshakeSendError),
+            };
 
-            self.conn_read.as_mut().unwrap().read_exact(&mut self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE]).unwrap();
-            self.session.read_message(&self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE], &mut self._payload).unwrap();
+            // server <-
+            let _match = self.conn_read.as_mut().unwrap().read_exact(&mut self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE]);
+            match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ServerHandshakeReceive2Error),
+            };
 
-            let server_len = self.session.write_message(&[], &mut self._payload).unwrap();
-            println!("server write len {}", server_len);
-            self.conn_write.as_mut().unwrap().write_all(&self._payload[..server_len]).unwrap();
+            let _match = self.session.read_message(&self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE], &mut self._payload);
+            _len = match _match {
+                Ok(x) => x,
+                Err(_) => return Err(SessionError::ServerHandshakeNoise3Error),
+            };
+            assert_eq!(NOISE_HANDSHAKE_MESSAGE3_SIZE, _len);
         }
         return Ok(());
     }
@@ -206,7 +263,7 @@ mod tests {
 
         // setup streams
         let mut client_stream = SyncMockStream::new();
-        client_session.initialize(Box::new(client_stream.clone()), Box::new(client_stream.clone())).unwrap();
+        //client_session.initialize(Box::new(client_stream.clone()), Box::new(client_stream.clone())).unwrap();
 
         // XXX fix me
 

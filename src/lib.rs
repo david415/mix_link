@@ -66,12 +66,17 @@ mod tests {
         let mut client_in = [0u8; 65535];
 
         // handshake
-        let mut client_len = client_session.write_message(&[], &mut client_out).unwrap();
+        let mut client_len = client_session.write_message(&[0u8; 0], &mut client_out).unwrap();
         let mut server_len = server_session.read_message(&client_out[..client_len], &mut server_in).unwrap();
+        println!("c -> s {}", client_len);
+
         server_len = server_session.write_message(&[0u8; 0], &mut server_out).unwrap();
         client_len = client_session.read_message(&server_out[..server_len], &mut client_in).unwrap();
+        println!("s -> c {}", server_len);
+
         client_len = client_session.write_message(&[], &mut client_out).unwrap();
         server_session.read_message(&client_out[..client_len], &mut server_in).unwrap();
+        println!("c -> s {}", client_len);
 
         // data transfer
         client_session = client_session.into_transport_mode().unwrap();
