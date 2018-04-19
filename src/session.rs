@@ -33,7 +33,7 @@ use snow::NoiseBuilder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
 use super::error::SessionError;
-
+use super::commands::Command;
 
 const NOISE_PARAMS: &'static str = "Noise_XX_25519_ChaChaPoly_BLAKE2b";
 const PROLOGUE: [u8;1] = [0u8;1];
@@ -108,7 +108,6 @@ pub struct Session {
     state: SessionState,
     conn_write: Option<Box<Write>>,
     conn_read: Option<Box<Read>>,
-    _buf: [u8; NOISE_MESSAGE_MAX_SIZE],
 }
 
 impl Session {
@@ -146,7 +145,6 @@ impl Session {
                 authenticator: session_config.authenticator,
                 authentication_key: session_config.authentication_key,
                 session: _session,
-                _buf: [0u8; NOISE_MESSAGE_MAX_SIZE],
                 conn_read: None,
                 conn_write: None,
                 state: SessionState::Init,
@@ -161,12 +159,12 @@ impl Session {
         }
         self.conn_read = Some(conn_read);
         self.conn_write = Some(conn_write);
-        self.handshake().unwrap(); // XXX
-
+        self.handshake()?;
+        self.finalize_handshake()?;
         return Ok(());
     }
 
-    pub fn handshake(&mut self) -> Result<(), SessionError> {
+    fn handshake(&mut self) -> Result<(), SessionError> {
         if self.initiator {
             // client -> server
             let mut _msg1 = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
@@ -243,7 +241,8 @@ impl Session {
                 return Err(SessionError::ServerPrologueMismatchError);
             }
 
-            let _match = self.session.read_message(&_msg1, &mut self._buf);
+            let mut _msg1p = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
+            let _match = self.session.read_message(&_msg1, &mut _msg1p);
             let mut _len = match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ServerHandshakeNoise1Error),
@@ -298,6 +297,14 @@ impl Session {
             }
         }
         return Ok(());
+    }
+
+    fn recv_command() -> Result<Box<Command>, SessionError> {
+        return Err(SessionError::ServerAuthenticationError); // XXX
+    }
+
+    fn finalize_handshake(&mut self) -> Result<(), SessionError> {
+        return Ok(()); // XXX
     }
 }
 

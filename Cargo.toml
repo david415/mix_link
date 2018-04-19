@@ -9,6 +9,8 @@ keywords = ["cryptography", "noise", "network"]
 snow = { path = "../snow" }
 #snow = "0.1.8-preview"
 ecdh_wrapper = "0.0.0"
+#sphinxcrypto = "0.0.2"
+sphinxcrypto = { path = "../rust-sphinxcrypto" }
 byteorder = "1.2.2"
 subtle = "0.6.0"
 
