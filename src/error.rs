@@ -36,12 +36,14 @@ pub enum SessionError {
     ClientHandshakeSend1Error,
     ClientHandshakeSend2Error,
     ClientHandshakeReceiveError,
+    ClientAuthenticationError,
     ServerHandshakeReceive1Error,
     ServerHandshakeReceive2Error,
     ServerHandshakeSendError,
     ServerHandshakeNoise1Error,
     ServerHandshakeNoise2Error,
     ServerHandshakeNoise3Error,
+    ServerPrologueMismatchError,
 }
 
 impl fmt::Display for SessionError {
@@ -57,12 +59,14 @@ impl fmt::Display for SessionError {
             ClientHandshakeSend1Error => write!(f, "Error sending client handshake payload."),
             ClientHandshakeSend2Error => write!(f, "Error sending client handshake payload."),
             ClientHandshakeReceiveError => write!(f, "Error receiving client handshake payload."),
+            ClientAuthenticationError => write!(f, "Error authenticating peer."),
             ServerHandshakeNoise1Error => write!(f, "Error preparing server handshake payload."),
             ServerHandshakeNoise2Error => write!(f, "Error preparing server handshake payload."),
             ServerHandshakeNoise3Error => write!(f, "Error preparing server handshake payload."),
             ServerHandshakeSendError => write!(f, "Error sending server handshake payload."),
             ServerHandshakeReceive1Error => write!(f, "Error receiving server handshake payload."),
             ServerHandshakeReceive2Error => write!(f, "Error receiving server handshake payload."),
+            ServerPrologueMismatchError => write!(f, "Error server received wrong prologue from client."),
         }
     }
 }
@@ -85,12 +89,14 @@ impl Error for SessionError {
             ClientHandshakeSend1Error => None,
             ClientHandshakeSend2Error => None,
             ClientHandshakeReceiveError => None,
+            ClientAuthenticationError => None,
             ServerHandshakeNoise1Error => None,
             ServerHandshakeNoise2Error => None,
             ServerHandshakeNoise3Error => None,
             ServerHandshakeSendError => None,
             ServerHandshakeReceive1Error => None,
             ServerHandshakeReceive2Error => None,
+            ServerPrologueMismatchError => None,
         }
     }
 }

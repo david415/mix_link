@@ -24,8 +24,10 @@
 extern crate snow;
 extern crate ecdh_wrapper;
 
-use std::net::TcpStream;
 use std::io::{Write, Read};
+use std::time::SystemTime;
+use subtle::ConstantTimeEq;
+use byteorder::{ByteOrder, BigEndian};
 use snow::params::NoiseParams;
 use snow::NoiseBuilder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
@@ -41,6 +43,38 @@ const NOISE_HANDSHAKE_MESSAGE1_SIZE: usize = 32;
 const NOISE_HANDSHAKE_MESSAGE2_SIZE: usize = 96;
 const NOISE_HANDSHAKE_MESSAGE3_SIZE: usize = 64;
 
+const MAX_ADDITIONAL_DATA_SIZE: usize = 255;
+const AUTH_MESSAGE_SIZE: usize = 1 + 4 + MAX_ADDITIONAL_DATA_SIZE;
+
+struct AuthenticateMessage {
+    additional_data: Vec<u8>,
+    unix_time: u32,
+}
+
+impl AuthenticateMessage {
+    fn to_vec(&self) -> Result<Vec<u8>, &'static str> {
+        if self.additional_data.len() > MAX_ADDITIONAL_DATA_SIZE {
+            return Err("additional data exceeds maximum allowed size");
+        }
+        let mut out = Vec::new();
+        out.push(self.additional_data.len() as u8);
+        out.extend_from_slice(&self.additional_data);
+        let mut _time = [0u8; 4];
+        BigEndian::write_u32(&mut _time, self.unix_time);
+        out.extend_from_slice(&_time);
+        return Ok(out);
+    }
+}
+
+fn authenticate_message_from_bytes(b: &[u8]) -> Result<AuthenticateMessage, &'static str> {
+    if b.len() != AUTH_MESSAGE_SIZE {
+        return Err("authenticate message is not the valid size");
+    }
+    return Ok(AuthenticateMessage {
+        additional_data: b[1..1+b.len()].to_vec(),
+        unix_time: BigEndian::read_u32(&b[1+MAX_ADDITIONAL_DATA_SIZE..]),
+    });
+}
 
 #[derive(PartialEq, Eq)]
 enum SessionState {
@@ -68,16 +102,17 @@ pub struct SessionConfig {
 pub struct Session {
     initiator: bool,
     session: snow::Session,
+    additional_data: Vec<u8>,
+    authenticator: Box<PeerAuthenticator>,
     authentication_key: PrivateKey,
     state: SessionState,
     conn_write: Option<Box<Write>>,
     conn_read: Option<Box<Read>>,
     _buf: [u8; NOISE_MESSAGE_MAX_SIZE],
-    _payload: [u8; NOISE_MESSAGE_MAX_SIZE],
 }
 
 impl Session {
-    pub fn new(session_config: &SessionConfig, is_initiator: bool) -> Result<Session, SessionError> {
+    pub fn new(session_config: SessionConfig, is_initiator: bool) -> Result<Session, SessionError> {
         let _noise_params: NoiseParams = NOISE_PARAMS.parse().unwrap();
         let _server_builder: NoiseBuilder = NoiseBuilder::new(_noise_params);
         let _session: snow::Session;
@@ -104,17 +139,20 @@ impl Session {
                 Err(_) => return Err(SessionError::SessionCreateError),
             };
         }
-        let _s = Session {
-            initiator: is_initiator,
-            authentication_key: session_config.authentication_key,
-            session: _session,
-            _buf: [0u8; NOISE_MESSAGE_MAX_SIZE],
-            _payload: [0u8; NOISE_MESSAGE_MAX_SIZE],
-            conn_read: None,
-            conn_write: None,
-            state: SessionState::Init,
-        };
-        Ok(_s)
+        {
+            let _s = Session {
+                initiator: is_initiator,
+                additional_data: session_config.additional_data,
+                authenticator: session_config.authenticator,
+                authentication_key: session_config.authentication_key,
+                session: _session,
+                _buf: [0u8; NOISE_MESSAGE_MAX_SIZE],
+                conn_read: None,
+                conn_write: None,
+                state: SessionState::Init,
+            };
+            Ok(_s)
+        }
     }
 
     pub fn initialize(&mut self, conn_read: Box<Read>, conn_write: Box<Write>) -> Result<(), SessionError> {
@@ -131,55 +169,81 @@ impl Session {
     pub fn handshake(&mut self) -> Result<(), SessionError> {
         if self.initiator {
             // client -> server
-            let _match = self.session.write_message(&PROLOGUE, &mut self._buf);
+            let mut _msg1 = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
+            let _match = self.session.write_message(&PROLOGUE, &mut _msg1);
             let mut _len = match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ClientHandshakeNoise1Error),
             };
             assert_eq!(NOISE_HANDSHAKE_MESSAGE1_SIZE, _len);
 
-            let mut _match = self.conn_write.as_mut().unwrap().write_all(&self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE]);
+            let mut _match = self.conn_write.as_mut().unwrap().write_all(&_msg1);
             match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ClientHandshakeSend1Error),
             };
 
             // client <- server
-            let _match = self.conn_read.as_mut().unwrap().read(&mut self._buf);
+            let mut _msg2 = [0u8; NOISE_HANDSHAKE_MESSAGE2_SIZE];
+            let _match = self.conn_read.as_mut().unwrap().read(&mut _msg2);
             _len = match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ClientHandshakeReceiveError),
             };
             assert_eq!(NOISE_HANDSHAKE_MESSAGE2_SIZE, _len);
 
-            let _match = self.session.read_message(&self._buf[..NOISE_HANDSHAKE_MESSAGE2_SIZE], &mut self._payload);
+            let mut _raw_auth = [0u8; AUTH_MESSAGE_SIZE];
+            let _match = self.session.read_message(&_msg2, &mut _raw_auth);
             _len = match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ClientHandshakeNoise2Error),
             };
             assert_eq!(NOISE_HANDSHAKE_MESSAGE2_SIZE, _len);
 
+            // convert _raw_auth to AuthenticateMessage
+            let auth_msg = authenticate_message_from_bytes(&_raw_auth).unwrap();
+
+            // verify auth info
+            {
+                let raw_peer_key = self.session.get_remote_static().unwrap();
+                let mut peer_key = PublicKey::default();
+                peer_key.from_bytes(raw_peer_key);
+                let peer_credentials = PeerCredentials {
+                    additional_data: auth_msg.additional_data,
+                    public_key: peer_key,
+                };
+                if !self.authenticator.is_peer_valid(&peer_credentials) {
+                    return Err(SessionError::ClientAuthenticationError);
+                }
+            }
+
             // client -> server
-            let _match = self.session.write_message(&[], &mut self._payload);
+            let mut _msg3 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
+            let _match = self.session.write_message(&[], &mut _msg3);
             _len = match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ClientHandshakeNoise3Error),
             };
             assert_eq!(NOISE_HANDSHAKE_MESSAGE3_SIZE, _len);
-            let mut _match = self.conn_write.as_mut().unwrap().write_all(&self._buf[.._len]);
+            let mut _match = self.conn_write.as_mut().unwrap().write_all(&_msg3);
             match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ClientHandshakeSend2Error),
             };
         } else {
             // server <-
-            let _match = self.conn_read.as_mut().unwrap().read_exact(&mut self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE]);
+            let mut _msg1 = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
+            let _match = self.conn_read.as_mut().unwrap().read_exact(&mut _msg1);
             match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ServerHandshakeReceive1Error),
             };
 
-            let _match = self.session.read_message(&self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE], &mut self._payload);
+            if _msg1[0..1].ct_eq(&PROLOGUE).unwrap_u8() == 0 {
+                return Err(SessionError::ServerPrologueMismatchError);
+            }
+
+            let _match = self.session.read_message(&_msg1, &mut self._buf);
             let mut _len = match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ServerHandshakeNoise1Error),
@@ -187,27 +251,35 @@ impl Session {
             assert_eq!(NOISE_HANDSHAKE_MESSAGE1_SIZE, _len);
 
             // server ->
-            let _match = self.session.write_message(&[], &mut self._payload);
+            let now = SystemTime::now();
+            let our_auth = AuthenticateMessage {
+                additional_data: self.additional_data.clone(),
+                unix_time: now.elapsed().unwrap().as_secs() as u32,
+            };
+            let raw_auth = our_auth.to_vec().unwrap();
+            let mut _msg2 = [0u8; NOISE_HANDSHAKE_MESSAGE2_SIZE];
+            let _match = self.session.write_message(&raw_auth, &mut _msg2);
             let mut _len = match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ServerHandshakeNoise2Error),
             };
             assert_eq!(NOISE_HANDSHAKE_MESSAGE2_SIZE, _len);
 
-            let _match = self.conn_write.as_mut().unwrap().write_all(&self._payload[..NOISE_HANDSHAKE_MESSAGE3_SIZE]);
+            let _match = self.conn_write.as_mut().unwrap().write_all(&_msg2);
             match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ServerHandshakeSendError),
             };
 
             // server <-
-            let _match = self.conn_read.as_mut().unwrap().read_exact(&mut self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE]);
+            let mut _msg3 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
+            let _match = self.conn_read.as_mut().unwrap().read_exact(&mut _msg3);
             match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ServerHandshakeReceive2Error),
             };
 
-            let _match = self.session.read_message(&self._buf[..NOISE_HANDSHAKE_MESSAGE1_SIZE], &mut self._payload);
+            let _match = self.session.read_message(&_msg3, &mut self._buf);
             _len = match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ServerHandshakeNoise3Error),
@@ -248,7 +320,7 @@ mod tests {
             peer_public_key: None,
             additional_data: vec![],
         };
-        let mut server_session = Session::new(&server_config, false).unwrap();
+        let mut server_session = Session::new(server_config, false).unwrap();
 
         // client
         let authenticator = NaiveAuthenticator{};
@@ -259,7 +331,7 @@ mod tests {
             peer_public_key: Some(server_keypair.public_key()),
             additional_data: vec![],
         };
-        let mut client_session = Session::new(&client_config, true).unwrap();
+        let mut client_session = Session::new(client_config, true).unwrap();
 
         // setup streams
         let mut client_stream = SyncMockStream::new();

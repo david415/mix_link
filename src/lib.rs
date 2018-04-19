@@ -23,6 +23,8 @@
 
 extern crate snow;
 extern crate ecdh_wrapper;
+extern crate byteorder;
+extern crate subtle;
 
 pub mod session;
 pub mod error;
