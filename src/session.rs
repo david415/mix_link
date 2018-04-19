@@ -278,13 +278,24 @@ impl Session {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ServerHandshakeReceive2Error),
             };
-
-            let _match = self.session.read_message(&_msg3, &mut self._buf);
-            _len = match _match {
+            let mut raw_auth = [0u8; AUTH_MESSAGE_SIZE];
+            let _match = self.session.read_message(&_msg3, &mut raw_auth);
+            match _match {
                 Ok(x) => x,
                 Err(_) => return Err(SessionError::ServerHandshakeNoise3Error),
             };
-            assert_eq!(NOISE_HANDSHAKE_MESSAGE3_SIZE, _len);
+
+            let peer_auth = authenticate_message_from_bytes(&raw_auth).unwrap();
+            let raw_peer_key = self.session.get_remote_static().unwrap();
+            let mut peer_key = PublicKey::default();
+            peer_key.from_bytes(raw_peer_key);
+            let peer_credentials = PeerCredentials {
+                additional_data: peer_auth.additional_data,
+                public_key: peer_key,
+            };
+            if !self.authenticator.is_peer_valid(&peer_credentials) {
+                return Err(SessionError::ServerAuthenticationError);
+            }
         }
         return Ok(());
     }

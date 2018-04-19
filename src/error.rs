@@ -44,6 +44,7 @@ pub enum SessionError {
     ServerHandshakeNoise2Error,
     ServerHandshakeNoise3Error,
     ServerPrologueMismatchError,
+    ServerAuthenticationError,
 }
 
 impl fmt::Display for SessionError {
@@ -67,6 +68,7 @@ impl fmt::Display for SessionError {
             ServerHandshakeReceive1Error => write!(f, "Error receiving server handshake payload."),
             ServerHandshakeReceive2Error => write!(f, "Error receiving server handshake payload."),
             ServerPrologueMismatchError => write!(f, "Error server received wrong prologue from client."),
+            ServerAuthenticationError => write!(f, "Error server failed to authenticate client."),
         }
     }
 }
@@ -97,6 +99,7 @@ impl Error for SessionError {
             ServerHandshakeReceive1Error => None,
             ServerHandshakeReceive2Error => None,
             ServerPrologueMismatchError => None,
+            ServerAuthenticationError => None,
         }
     }
 }
