@@ -21,9 +21,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-
-use byteorder::{ByteOrder, BigEndian};
 use std::any::Any;
+use byteorder::{ByteOrder, BigEndian};
+use subtle::ConstantTimeEq;
 use ecdh_wrapper::{KEY_SIZE, PublicKey};
 
 use sphinxcrypto::constants::{FORWARD_PAYLOAD_SIZE,
@@ -421,12 +421,81 @@ fn message_from_bytes(b: &[u8]) -> Result<Box<Command>, CommandError> {
             if _msg.len() != MESSAGE_MSG_PADDING_SIZE + USER_FORWARD_PAYLOAD_SIZE {
                 return Err(CommandError::MessageDecodeError);
             }
-            return Err(CommandError::InvalidMessageType); // XXX
+
+            let zeros = [0u8; USER_FORWARD_PAYLOAD_SIZE];
+            if zeros.ct_eq(&_msg[USER_FORWARD_PAYLOAD_SIZE..]).unwrap_u8() == 0 {
+                return Err(CommandError::MessageDecodeError);
+            }
+            let _msg = &_msg[..USER_FORWARD_PAYLOAD_SIZE];
+            let _message = Message {
+                queue_size_hint: _hint,
+                sequence: _seq,
+                payload: _msg.to_vec(),
+            };
+            return Ok(Box::new(_message));
         },
         Some(MESSAGE_TYPE_EMPTY) => {
-            return Err(CommandError::InvalidMessageType); // XXX
+            if _msg.len() != MESSAGE_EMPTY_SIZE - MESSAGE_BASE_SIZE {
+                return Err(CommandError::MessageDecodeError);
+            }
+            let zeros = [0u8; MESSAGE_EMPTY_SIZE - MESSAGE_BASE_SIZE];
+            if zeros.ct_eq(&_msg[MESSAGE_EMPTY_SIZE - MESSAGE_BASE_SIZE..]).unwrap_u8() == 0 {
+                return Err(CommandError::MessageDecodeError);
+            }
+            return Ok(Box::new(MessageEmpty{
+                sequence: _seq,
+            }));
         },
         Some(_) => return Err(CommandError::InvalidMessageType),
         None => return Err(CommandError::InvalidMessageType),
     }
+}
+
+fn from_bytes(b: &[u8]) -> Result<Box<Command>, CommandError> {
+    if b.len() < CMD_OVERHEAD {
+        return Err(CommandError::InvalidMessageType) // XXX
+    }
+    let _id = b[0];
+    if b[1] != 0 {
+        return Err(CommandError::InvalidMessageType) // XXX
+    }
+    let cmd_len = BigEndian::read_u32(&b[2..6]);
+    let _cmd = &b[CMD_OVERHEAD..];
+    if _cmd.len() < cmd_len as usize {
+        return Err(CommandError::InvalidMessageType) // XXX
+    }
+    let _padding = &_cmd[cmd_len as usize..];
+    let _zeros = vec![0u8; cmd_len as usize];
+    if _zeros.ct_eq(&_padding).unwrap_u8() == 0 {
+        return Err(CommandError::MessageDecodeError); // XXX
+    }
+
+    // handle commands with no payload
+    // XXX return better errors?
+    if cmd_len == 0 {
+        match Some(_id) {
+            Some(NO_OP) => return Ok(Box::new(NoOp{})),
+            Some(DISCONNECT) => return Ok(Box::new(Disconnect{})),
+            Some(SEND_PACKET) => return Err(CommandError::MessageDecodeError),
+            Some(POST_DESCRIPTOR) => return Err(CommandError::MessageDecodeError),
+            Some(_) => return Err(CommandError::MessageDecodeError),
+            None => return Err(CommandError::MessageDecodeError),
+        }
+    }
+    let _cmd = &_cmd[CMD_OVERHEAD..];
+    if _cmd.len() < cmd_len as usize {
+        return Err(CommandError::MessageDecodeError);
+    }
+    match Some(_id) {
+        Some(SEND_PACKET) => return Ok(Box::new(send_packet_from_bytes(_cmd).unwrap())),
+        Some(RETRIEVE_MESSAGE) => return Ok(Box::new(retrieve_message_from_bytes(_cmd).unwrap())),
+        Some(MESSAGE) => return Ok(message_from_bytes(_cmd).unwrap()),
+        Some(GET_CONSENSUS) => return Ok(Box::new(get_consensus_from_bytes(_cmd).unwrap())),
+        Some(POST_DESCRIPTOR) => return Ok(Box::new(post_descriptor_from_bytes(_cmd).unwrap())),
+        Some(VOTE) => return Ok(Box::new(vote_from_bytes(_cmd).unwrap())),
+        Some(VOTE_STATUS) => return Ok(Box::new(vote_status_from_bytes(_cmd).unwrap())),
+        Some(_) => return Err(CommandError::MessageDecodeError),
+        None => return Err(CommandError::MessageDecodeError),
+    }
+    return Err(CommandError::InvalidMessageType) // XXX
 }
