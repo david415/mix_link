@@ -24,12 +24,20 @@
 
 use byteorder::{ByteOrder, BigEndian};
 use std::any::Any;
-use sphinxcrypto::constants::{FORWARD_PAYLOAD_SIZE, PAYLOAD_TAG_SIZE, SURB_ID_SIZE, SPHINX_PLAINTEXT_HEADER_SIZE, SURB_SIZE};
-use ecdh_wrapper::KEY_SIZE;
+use ecdh_wrapper::{KEY_SIZE, PublicKey};
+
+use sphinxcrypto::constants::{FORWARD_PAYLOAD_SIZE,
+                              PAYLOAD_TAG_SIZE,
+                              SURB_ID_SIZE,
+                              SPHINX_PLAINTEXT_HEADER_SIZE,
+                              SURB_SIZE,
+                              USER_FORWARD_PAYLOAD_SIZE};
+
+use super::error::CommandError;
 
 const CMD_OVERHEAD: usize = 1 + 1 + 4;
 
-const RETREIVE_MESSAGE_SIZE: usize = 4;
+const RETRIEVE_MESSAGE_SIZE: usize = 4;
 const MESSAGE_BASE_SIZE: usize = 1 + 1 + 4;
 const MESSAGE_ACK_SIZE: usize = MESSAGE_BASE_SIZE + SURB_ID_SIZE;
 const MESSAGE_MSG_PADDING_SIZE: usize = SURB_ID_SIZE + SPHINX_PLAINTEXT_HEADER_SIZE + SURB_SIZE + PAYLOAD_TAG_SIZE;
@@ -56,7 +64,7 @@ const DISCONNECT: u8 = 1;
 const SEND_PACKET: u8 = 2;
 
 // Implementation defined commands.
-const RETREIVE_MESSAGE: u8 = 16;
+const RETRIEVE_MESSAGE: u8 = 16;
 const MESSAGE: u8 = 17;
 const GET_CONSENSUS: u8 = 18;
 const CONSENSUS: u8 = 19;
@@ -90,5 +98,298 @@ impl Command for GetConsensus {
         out[0] = NO_OP;
         out
         
+    }
+}
+
+fn get_consensus_from_bytes(b: &[u8]) -> Result<GetConsensus, CommandError> {
+    if b.len() != GET_CONSENSUS_SIZE {
+        return Err(CommandError::GetConsensusDecodeError);
+    }
+    return Ok(GetConsensus{
+        epoch: BigEndian::read_u64(&b[..8]),
+    });
+}
+
+pub struct Consensus {
+    error_code: u8,
+    payload: Vec<u8>,
+}
+
+impl Command for Consensus {
+    fn to_vec(&self) -> Vec<u8> {
+        let consensus_size: usize = CONSENSUS_BASE_SIZE + self.payload.len();
+        let mut out = vec![];
+        out.push(CONSENSUS);
+        let mut _len_raw = [0u8; 4];
+        BigEndian::write_u32(&mut _len_raw[2..6], consensus_size as u32);
+        out.extend_from_slice(&_len_raw);
+        out.push(self.error_code);
+        out.extend_from_slice(&self.payload);
+        return out;
+    }
+}
+
+fn consensus_from_bytes(b: &[u8]) -> Result<Consensus, CommandError> {
+    if b.len() < CONSENSUS_BASE_SIZE {
+        return Err(CommandError::ConsensusDecodeError);
+    }
+    let _payload_len = (b.len() - CONSENSUS_BASE_SIZE) as u8;
+    let mut _payload: Vec<u8> = vec![];
+    if _payload_len > 0 {
+        _payload.push(_payload_len);
+        _payload.extend_from_slice(&b[CONSENSUS_BASE_SIZE..]);
+    }
+    return Ok(Consensus {
+        error_code: b[0],
+        payload: _payload,
+    });
+}
+
+pub struct PostDescriptor {
+    epoch: u64,
+    payload: Vec<u8>,
+}
+
+impl Command for PostDescriptor {
+    fn to_vec(&self) -> Vec<u8> {
+        let mut out = vec![];
+        out.push(POST_DESCRIPTOR);
+        let mut _desc_len = [0u8; 4];
+        BigEndian::write_u32(&mut _desc_len, POST_DESCRIPTOR_SIZE as u32 + self.payload.len() as u32);
+        out.extend_from_slice(&_desc_len);
+        let mut _epoch = [0u8; 8];
+        BigEndian::write_u64(&mut _epoch, self.epoch);
+        out.extend_from_slice(&_epoch);
+        out.extend_from_slice(&self.payload);
+        return out;
+    }
+}
+
+fn post_descriptor_from_bytes(b: &[u8]) -> Result<PostDescriptor, CommandError> {
+    if b.len() < POST_DESCRIPTOR_SIZE {
+        return Err(CommandError::PostDescriptorDecodeError);
+    }
+    let mut _payload: Vec<u8> = vec![];
+    _payload.push((b.len()-POST_DESCRIPTOR_SIZE) as u8);
+    _payload.extend_from_slice(&b[POST_DESCRIPTOR_SIZE..]);
+    return Ok(PostDescriptor {
+            epoch: BigEndian::read_u64(&b[..8]),
+            payload: _payload,
+        });
+}
+
+pub struct PostDescriptorStatus {
+    error_code: u8,
+}
+
+impl Command for PostDescriptorStatus {
+    fn to_vec(&self) -> Vec<u8> {
+        let mut out = vec![];
+        out.push(POST_DESCRIPTOR_STATUS);
+        let mut _len = [0u8; 4];
+        BigEndian::write_u32(&mut _len, POST_DESCRIPTOR_STATUS_SIZE as u32);
+        out.extend_from_slice(&_len);
+        out.push(self.error_code);
+        out
+    }
+}
+
+fn post_descriptor_status_from_bytes(b: &[u8]) -> Result<PostDescriptorStatus, CommandError> {
+    if b.len() != POST_DESCRIPTOR_STATUS_SIZE {
+        return Err(CommandError::PostDescriptorStatusDecodeError);
+    }
+    return Ok(PostDescriptorStatus{
+        error_code: b[0],
+    });
+}
+
+pub struct Vote {
+    epoch: u64,
+    public_key: PublicKey,
+    payload: Vec<u8>,
+}
+
+impl Command for Vote {
+    fn to_vec(&self) -> Vec<u8> {
+        let mut out = vec![];
+        out.push(VOTE);
+        let mut _len = [0u8; 4];
+        BigEndian::write_u32(&mut _len, (VOTE_OVERHEAD+self.payload.len()) as u32);
+        out.extend_from_slice(&_len);
+        let mut _epoch = [0u8; 8];
+        BigEndian::write_u64(&mut _epoch, self.epoch);
+        out.extend_from_slice(&_epoch);
+        out.extend_from_slice(&self.public_key.as_array());
+        out.extend_from_slice(&self.payload);
+        out
+    }
+}
+
+fn vote_from_bytes(b: &[u8]) -> Result<Vote, CommandError> {
+    if b.len() < VOTE_OVERHEAD {
+        return Err(CommandError::VoteDecodeError);
+    }
+    let mut _public_key = PublicKey::default();
+    _public_key.from_bytes(&b[8..40]).unwrap();
+    return Ok(Vote{
+        epoch: BigEndian::read_u64(&b[..8]),
+        public_key: _public_key,
+        payload: b[VOTE_OVERHEAD..].to_vec(),
+    });
+}
+
+pub struct VoteStatus {
+    error_code: u8,
+}
+
+impl Command for VoteStatus {
+    fn to_vec(&self) -> Vec<u8> {
+        let mut out = vec![];
+        out.push(VOTE_STATUS);
+        let mut _len = [0u8; 4];
+        BigEndian::write_u32(&mut _len, VOTE_STATUS_SIZE as u32);
+        out.extend_from_slice(&_len);
+        out.push(self.error_code);
+        out
+    }
+}
+
+fn vote_status_from_bytes(b: &[u8]) -> Result<VoteStatus, CommandError> {
+    if b.len() != VOTE_STATUS_SIZE {
+        return Err(CommandError::VoteStatusDecodeError);
+    }
+    return Ok(VoteStatus{
+        error_code: b[0],
+    });
+}
+
+pub struct Disconnect {}
+
+impl Command for Disconnect {
+    fn to_vec(&self) -> Vec<u8> {
+        let mut out = vec![0; CMD_OVERHEAD];
+        out[0] = DISCONNECT;
+        out
+    }
+}
+
+pub struct SendPacket {
+    sphinx_packet: Vec<u8>,
+}
+
+impl Command for SendPacket {
+    fn to_vec(&self) -> Vec<u8> {
+        let mut out = vec![];
+        out.push(SEND_PACKET);
+        let mut _len = [0u8; 4];
+        BigEndian::write_u32(&mut _len, self.sphinx_packet.len() as u32);
+        out.extend_from_slice(&_len);
+        out.extend_from_slice(&self.sphinx_packet);
+        out
+    }
+}
+
+fn send_packet_from_bytes(b: &[u8]) -> Result<SendPacket, CommandError> {
+    return Ok(SendPacket{
+        sphinx_packet: b.to_vec(),
+    });
+}
+
+pub struct RetrieveMessage {
+    sequence: u32,
+}
+
+impl Command for RetrieveMessage {
+    fn to_vec(&self) -> Vec<u8> {
+        let mut out = vec![];
+        out.push(RETRIEVE_MESSAGE);
+        let mut _len = [0u8; 4];
+        BigEndian::write_u32(&mut _len, RETRIEVE_MESSAGE_SIZE as u32);
+        out.extend_from_slice(&_len);
+        let mut _seq = [0u8; 4];
+        BigEndian::write_u32(&mut _len, self.sequence);
+        out.extend_from_slice(&_seq);
+        out
+    }
+}
+
+fn retrieve_message_from_bytes(b: &[u8]) -> Result<RetrieveMessage, CommandError> {
+    if b.len() != RETRIEVE_MESSAGE_SIZE {
+        return Err(CommandError::RetreiveMessageDecodeError);
+    }
+    return Ok(RetrieveMessage{
+        sequence: BigEndian::read_u32(&b[..4]),
+    });
+}
+
+pub struct MessageAck {
+    queue_size_hint: u8,
+    sequence: u32,
+    id: [u8; SURB_ID_SIZE],
+    payload: Vec<u8>,
+}
+
+impl Command for MessageAck {
+    fn to_vec(&self) -> Vec<u8> {
+        if self.payload.len() != PAYLOAD_TAG_SIZE + FORWARD_PAYLOAD_SIZE {
+            panic!("invalid MessageAck payload when serializing");
+        }
+        let mut out = vec![];
+        out.push(MESSAGE);
+        let mut _len = [0u8; 4];
+        BigEndian::write_u32(&mut _len, (MESSAGE_ACK_SIZE + self.payload.len()) as u32);
+        out.extend_from_slice(&_len);
+        out.push(MESSAGE_TYPE_ACK);
+        out.push(self.queue_size_hint);
+        let mut _seq = [0u8; 4];
+        BigEndian::write_u32(&mut _seq, self.sequence);
+        out.extend_from_slice(&_seq);
+        out.extend_from_slice(&self.id);
+        out.extend_from_slice(&self.payload);
+        out
+    }
+}
+
+pub struct Message {
+    queue_size_hint: u8,
+    sequence: u32,
+    payload: Vec<u8>,
+}
+
+impl Command for Message {
+    fn to_vec(&self) -> Vec<u8> {
+        if self.payload.len() != USER_FORWARD_PAYLOAD_SIZE {
+            panic!("invalid MessageAck payload when serializing");
+        }
+        let mut out = vec![];
+        out.push(MESSAGE);
+        let mut _len = [0u8; 4];
+        BigEndian::write_u32(&mut _len, (MESSAGE_MSG_SIZE + self.payload.len()) as u32);
+        out.extend_from_slice(&_len);
+        out.push(MESSAGE_TYPE_MESSAGE);
+        out.push(self.queue_size_hint);
+        let mut _seq = [0u8; 4];
+        BigEndian::write_u32(&mut _seq, self.sequence);
+        out.extend_from_slice(&_seq);
+        out.extend_from_slice(&self.payload);
+        out
+    }
+}
+
+pub struct MessageEmpty {
+    sequence: u32,
+}
+
+impl Command for MessageEmpty {
+    fn to_vec(&self) -> Vec<u8> {
+        let mut out = vec![];
+        out.push(MESSAGE);
+        let mut _len = [0u8; 4];
+        BigEndian::write_u32(&mut _len, MESSAGE_EMPTY_SIZE as u32);
+        out.extend_from_slice(&_len);
+        let mut _seq = [0u8; 4];
+        BigEndian::write_u32(&mut _seq, self.sequence);
+        out.extend_from_slice(&_seq);
+        out
     }
 }

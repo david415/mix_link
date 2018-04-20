@@ -24,6 +24,52 @@
 use std::error::Error;
 use std::fmt;
 
+#[derive(Debug)]
+pub enum CommandError {
+    GetConsensusDecodeError,
+    ConsensusDecodeError,
+    PostDescriptorDecodeError,
+    PostDescriptorStatusDecodeError,
+    VoteDecodeError,
+    VoteStatusDecodeError,
+    RetreiveMessageDecodeError,
+}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::CommandError::*;
+        match *self {
+            GetConsensusDecodeError => write!(f, "Failed to decode a Get Consensus command."),
+            ConsensusDecodeError => write!(f, "Failed to decode a Consensus command."),
+            PostDescriptorDecodeError => write!(f, "Failed to decode a PostDescriptor command."),
+            PostDescriptorStatusDecodeError => write!(f, "Failed to decode a PostDescriptor command."),
+            VoteDecodeError => write!(f, "Failed to decode a Vote command."),
+            VoteStatusDecodeError => write!(f, "Failed to decode a VoteStatus command."),
+            RetreiveMessageDecodeError => write!(f, "Failed to decode a RetreiveMessage command."),
+        }
+    }
+}
+
+
+impl Error for CommandError {
+    fn description(&self) -> &str {
+        "I'm a modem error."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::CommandError::*;
+        match *self {
+            GetConsensusDecodeError => None,
+            ConsensusDecodeError => None,
+            PostDescriptorDecodeError => None,
+            PostDescriptorStatusDecodeError => None,
+            VoteDecodeError => None,
+            VoteStatusDecodeError => None,
+            RetreiveMessageDecodeError => None,
+        }
+    }
+}
+
 
 #[derive(Debug)]
 pub enum SessionError {
