@@ -393,3 +393,40 @@ impl Command for MessageEmpty {
         out
     }
 }
+
+fn message_from_bytes(b: &[u8]) -> Result<Box<Command>, CommandError> {
+    if b.len() < MESSAGE_BASE_SIZE {
+        return Err(CommandError::MessageDecodeError);
+    }
+    let _message_type = Some(b[0]);
+    let _hint = b[1];
+    let _seq = BigEndian::read_u32(&b[2..6]);
+    let _msg = &b[MESSAGE_BASE_SIZE..];
+    match _message_type {
+        Some(MESSAGE_TYPE_ACK) => {
+            if _msg.len() != SURB_ID_SIZE + PAYLOAD_TAG_SIZE + FORWARD_PAYLOAD_SIZE {
+                return Err(CommandError::MessageDecodeError);
+            }
+            let mut _id = [0u8; SURB_ID_SIZE];
+            _id.clone_from_slice(&_msg[..SURB_ID_SIZE]);
+            let r = MessageAck {
+                queue_size_hint: _hint,
+                sequence: _seq,
+                id: _id,
+                payload: _msg[SURB_ID_SIZE..].to_vec(),
+            };
+            return Ok(Box::new(r));
+        },
+        Some(MESSAGE_TYPE_MESSAGE) => {
+            if _msg.len() != MESSAGE_MSG_PADDING_SIZE + USER_FORWARD_PAYLOAD_SIZE {
+                return Err(CommandError::MessageDecodeError);
+            }
+            return Err(CommandError::InvalidMessageType); // XXX
+        },
+        Some(MESSAGE_TYPE_EMPTY) => {
+            return Err(CommandError::InvalidMessageType); // XXX
+        },
+        Some(_) => return Err(CommandError::InvalidMessageType),
+        None => return Err(CommandError::InvalidMessageType),
+    }
+}

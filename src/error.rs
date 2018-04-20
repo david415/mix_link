@@ -33,6 +33,8 @@ pub enum CommandError {
     VoteDecodeError,
     VoteStatusDecodeError,
     RetreiveMessageDecodeError,
+    MessageDecodeError,
+    InvalidMessageType,
 }
 
 impl fmt::Display for CommandError {
@@ -46,6 +48,8 @@ impl fmt::Display for CommandError {
             VoteDecodeError => write!(f, "Failed to decode a Vote command."),
             VoteStatusDecodeError => write!(f, "Failed to decode a VoteStatus command."),
             RetreiveMessageDecodeError => write!(f, "Failed to decode a RetreiveMessage command."),
+            MessageDecodeError => write!(f, "Failed to decode a Message command."),
+            InvalidMessageType => write!(f, "Failed to decode a Message command with invalid type."),
         }
     }
 }
@@ -66,6 +70,8 @@ impl Error for CommandError {
             VoteDecodeError => None,
             VoteStatusDecodeError => None,
             RetreiveMessageDecodeError => None,
+            MessageDecodeError => None,
+            InvalidMessageType => None,
         }
     }
 }
