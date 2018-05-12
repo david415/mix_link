@@ -35,6 +35,7 @@ pub enum CommandError {
     RetreiveMessageDecodeError,
     MessageDecodeError,
     InvalidMessageType,
+    InvalidStateError,
 }
 
 impl fmt::Display for CommandError {
@@ -50,6 +51,7 @@ impl fmt::Display for CommandError {
             RetreiveMessageDecodeError => write!(f, "Failed to decode a RetreiveMessage command."),
             MessageDecodeError => write!(f, "Failed to decode a Message command."),
             InvalidMessageType => write!(f, "Failed to decode a Message command with invalid type."),
+            InvalidStateError => write!(f, "Encountered invalid state transition."),
         }
     }
 }
@@ -72,6 +74,7 @@ impl Error for CommandError {
             RetreiveMessageDecodeError => None,
             MessageDecodeError => None,
             InvalidMessageType => None,
+            InvalidStateError => None,
         }
     }
 }

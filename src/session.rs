@@ -33,7 +33,7 @@ use snow::NoiseBuilder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
 use super::error::SessionError;
-use super::commands::Command;
+use super::commands::{Command, NoOp};
 
 const NOISE_PARAMS: &'static str = "Noise_XX_25519_ChaChaPoly_BLAKE2b";
 const PROLOGUE: [u8;1] = [0u8;1];
@@ -299,12 +299,25 @@ impl Session {
         return Ok(());
     }
 
-    fn recv_command() -> Result<Box<Command>, SessionError> {
+    fn recv_command(&mut self) -> Result<Box<Command>, SessionError> {
         return Err(SessionError::ServerAuthenticationError); // XXX
     }
 
+    // fn send_command(&mut self, cmd: Command) -> Result<Box<Command>, SessionError> {
+    //     if self.state != SessionState::Established {
+    //         return Err(SessionError::InvalidStateError);
+    //     }
+    //     return Err(SessionError::ServerAuthenticationError); // XXX
+    // }
+
     fn finalize_handshake(&mut self) -> Result<(), SessionError> {
-        return Ok(()); // XXX
+        if self.initiator {
+            let cmd = self.recv_command()?;
+            // XXX fix me
+        }
+        let no_op_cmd = NoOp{};
+        //return self.send_command(no_op_cmd);
+        return Ok(());
     }
 }
 
