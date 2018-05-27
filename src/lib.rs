@@ -27,8 +27,9 @@ extern crate byteorder;
 extern crate subtle;
 extern crate sphinxcrypto;
 
-pub mod commands;
 pub mod errors;
+pub mod constants;
+pub mod commands;
 pub mod messages;
 
 

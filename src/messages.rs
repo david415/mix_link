@@ -31,20 +31,10 @@ use snow::NoiseBuilder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
 use super::errors::{HandshakeError, SendMessageError, ReceiveMessageError};
-
-const NOISE_PARAMS: &'static str = "Noise_XX_25519_ChaChaPoly_BLAKE2b";
-const PROLOGUE: [u8;1] = [0u8;1];
-const PROLOGUE_SIZE: usize = 1;
-const NOISE_MESSAGE_MAX_SIZE: usize = 65535;
-const KEY_SIZE: usize = 32;
-const MAC_SIZE: usize = 16;
-const MAX_ADDITIONAL_DATA_SIZE: usize = 255;
-const AUTH_MESSAGE_SIZE: usize = 1 + 4 + MAX_ADDITIONAL_DATA_SIZE;
-const NOISE_HANDSHAKE_MESSAGE1_SIZE: usize = PROLOGUE_SIZE + KEY_SIZE;
-const NOISE_HANDSHAKE_MESSAGE2_SIZE: usize = 101;
-const NOISE_HANDSHAKE_MESSAGE3_SIZE: usize = 64;
-const NOISE_MESSAGE_HEADER_SIZE: usize = MAC_SIZE + 4;
-
+use super::constants::{NOISE_PARAMS, PROLOGUE, PROLOGUE_SIZE, NOISE_MESSAGE_MAX_SIZE,
+                       MAC_SIZE, MAX_ADDITIONAL_DATA_SIZE, AUTH_MESSAGE_SIZE, NOISE_HANDSHAKE_MESSAGE1_SIZE,
+                       NOISE_HANDSHAKE_MESSAGE2_SIZE, NOISE_HANDSHAKE_MESSAGE3_SIZE, NOISE_MESSAGE_HEADER_SIZE
+};
 
 struct AuthenticateMessage {
     additional_data: Vec<u8>,
