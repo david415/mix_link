@@ -34,7 +34,7 @@ use snow::NoiseBuilder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
 use super::errors::{HandshakeError, SendMessageError, ReceiveMessageError};
-use super::commands::{Command, NoOp};
+use super::commands::{Command};
 
 const NOISE_PARAMS: &'static str = "Noise_XX_25519_ChaChaPoly_BLAKE2b";
 const PROLOGUE: [u8;1] = [0u8;1];
@@ -44,10 +44,13 @@ const KEY_SIZE: usize = 32;
 const MAC_SIZE: usize = 16;
 const MAX_ADDITIONAL_DATA_SIZE: usize = 255;
 const AUTH_SIZE: usize = 1 + MAX_ADDITIONAL_DATA_SIZE + 4;
+const AUTH_MESSAGE_SIZE: usize = 1 + 4 + MAX_ADDITIONAL_DATA_SIZE;
 const NOISE_HANDSHAKE_MESSAGE1_SIZE: usize = PROLOGUE_SIZE + KEY_SIZE;
 const NOISE_HANDSHAKE_MESSAGE2_SIZE: usize = 101;
 const NOISE_HANDSHAKE_MESSAGE3_SIZE: usize = 64;
-const AUTH_MESSAGE_SIZE: usize = 1 + 4 + MAX_ADDITIONAL_DATA_SIZE;
+const NOISE_MESSAGE_HEADER_SIZE: usize = MAC_SIZE + 4;
+
+
 
 struct AuthenticateMessage {
     additional_data: Vec<u8>,
@@ -139,16 +142,14 @@ impl Session {
                 Err(_) => return Err(HandshakeError::SessionCreateError),
             };
         }
-        {
-            let _s = Session {
-                initiator: is_initiator,
-                additional_data: session_config.additional_data,
-                authenticator: session_config.authenticator,
-                authentication_key: session_config.authentication_key,
-                session: session,
-            };
-            Ok(_s)
-        }
+        let _s = Session {
+            initiator: is_initiator,
+            additional_data: session_config.additional_data,
+            authenticator: session_config.authenticator,
+            authentication_key: session_config.authentication_key,
+            session: session,
+        };
+        Ok(_s)
     }
 
     pub fn client_handshake1(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE1_SIZE], HandshakeError> {
@@ -298,13 +299,12 @@ impl Session {
     }
 
     pub fn decrypt_message_header(&mut self, message: Vec<u8>) -> Result<u32, ReceiveMessageError> {
-        let header_size = MAC_SIZE + 4;
         let mut ciphertext_header = [0u8; NOISE_MESSAGE_MAX_SIZE];
-        let _result = self.session.read_message(&message[..header_size], &mut ciphertext_header);
+        let _result = self.session.read_message(&message[..NOISE_MESSAGE_HEADER_SIZE], &mut ciphertext_header);
         match _result {
             Ok(x) => {
                 assert_eq!(x, 4);
-                return Ok(BigEndian::read_u32(&ciphertext_header[..header_size]));
+                return Ok(BigEndian::read_u32(&ciphertext_header[..NOISE_MESSAGE_HEADER_SIZE]));
             },
             Err(y) => {
                 return Err(ReceiveMessageError::DecryptFail);
@@ -385,8 +385,7 @@ mod tests {
         let message = text.into_bytes();
         let ciphertext = server_session.encrypt_message(message.clone()).unwrap();
         let message_len = client_session.decrypt_message_header(ciphertext.clone()).unwrap();
-        let header_size = MAC_SIZE + 4;
-        let plaintext = client_session.decrypt_message(ciphertext[header_size..].to_vec()).unwrap();
+        let plaintext = client_session.decrypt_message(ciphertext[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
         assert_eq!(message, plaintext);
     }
 }
