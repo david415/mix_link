@@ -23,9 +23,7 @@
 
 extern crate snow;
 extern crate ecdh_wrapper;
-extern crate rustc_serialize;
 
-use self::rustc_serialize::hex::ToHex;
 use std::time::SystemTime;
 use subtle::ConstantTimeEq;
 use byteorder::{ByteOrder, BigEndian};
@@ -34,7 +32,6 @@ use snow::NoiseBuilder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
 use super::errors::{HandshakeError, SendMessageError, ReceiveMessageError};
-use super::commands::{Command};
 
 const NOISE_PARAMS: &'static str = "Noise_XX_25519_ChaChaPoly_BLAKE2b";
 const PROLOGUE: [u8;1] = [0u8;1];
@@ -43,7 +40,6 @@ const NOISE_MESSAGE_MAX_SIZE: usize = 65535;
 const KEY_SIZE: usize = 32;
 const MAC_SIZE: usize = 16;
 const MAX_ADDITIONAL_DATA_SIZE: usize = 255;
-const AUTH_SIZE: usize = 1 + MAX_ADDITIONAL_DATA_SIZE + 4;
 const AUTH_MESSAGE_SIZE: usize = 1 + 4 + MAX_ADDITIONAL_DATA_SIZE;
 const NOISE_HANDSHAKE_MESSAGE1_SIZE: usize = PROLOGUE_SIZE + KEY_SIZE;
 const NOISE_HANDSHAKE_MESSAGE2_SIZE: usize = 101;
@@ -91,7 +87,7 @@ pub trait PeerAuthenticator {
     fn is_peer_valid(&self, peer_credentials: &PeerCredentials) -> bool;
 }
 
-pub struct SessionConfig {
+pub struct MessageFactoryConfig {
     pub authenticator: Box<PeerAuthenticator>,
     pub authentication_key: PrivateKey,
     pub peer_public_key: Option<PublicKey>,
@@ -105,16 +101,15 @@ enum SessionState {
     Invalid,
 }
 
-pub struct Session {
+pub struct MessageFactory {
     initiator: bool,
     session: snow::Session,
     additional_data: Vec<u8>,
     authenticator: Box<PeerAuthenticator>,
-    authentication_key: PrivateKey,
 }
 
-impl Session {
-    pub fn new(session_config: SessionConfig, is_initiator: bool) -> Result<Session, HandshakeError> {
+impl MessageFactory {
+    pub fn new(session_config: MessageFactoryConfig, is_initiator: bool) -> Result<MessageFactory, HandshakeError> {
         let noise_params: NoiseParams = NOISE_PARAMS.parse().unwrap();
         let noise_builder: NoiseBuilder = NoiseBuilder::new(noise_params);
         let session: snow::Session;
@@ -129,7 +124,7 @@ impl Session {
                 .build_initiator();
             session = match _match {
                 Ok(x) => x,
-                Err(_) => return Err(HandshakeError::SessionCreateError),
+                Err(_) => return Err(HandshakeError::MessageFactoryCreateError),
             };
         } else {
             let _match = noise_builder
@@ -138,14 +133,13 @@ impl Session {
                 .build_responder();
             session = match _match {
                 Ok(x) => x,
-                Err(_) => return Err(HandshakeError::SessionCreateError),
+                Err(_) => return Err(HandshakeError::MessageFactoryCreateError),
             };
         }
-        let _s = Session {
+        let _s = MessageFactory {
             initiator: is_initiator,
             additional_data: session_config.additional_data,
             authenticator: session_config.authenticator,
-            authentication_key: session_config.authentication_key,
             session: session,
         };
         Ok(_s)
@@ -252,7 +246,7 @@ impl Session {
 
     pub fn data_transfer(mut self) -> Result<Self, HandshakeError> {
         match self.session.into_transport_mode() {
-            Err(y) => {
+            Err(_) => {
                 return Err(HandshakeError::DataTransferFail)
             }
             Ok(x) => {
@@ -305,7 +299,7 @@ impl Session {
                 assert_eq!(x, 4);
                 return Ok(BigEndian::read_u32(&ciphertext_header[..NOISE_MESSAGE_HEADER_SIZE]));
             },
-            Err(y) => {
+            Err(_) => {
                 return Err(ReceiveMessageError::DecryptFail);
             },
         }
@@ -320,7 +314,7 @@ impl Session {
                 out.extend_from_slice(&ciphertext[..len]);                
                 return Ok(out);
             },
-            Err(y) => return Err(ReceiveMessageError::DecryptFail),
+            Err(_) => return Err(ReceiveMessageError::DecryptFail),
         }
     }
 }
@@ -348,24 +342,24 @@ mod tests {
         let mut r = OsRng::new().expect("failure to create an OS RNG");
         let server_keypair = PrivateKey::generate(&mut r).unwrap();
         let authenticator = NaiveAuthenticator{};
-        let server_config = SessionConfig {
+        let server_config = MessageFactoryConfig {
             authenticator: Box::new(authenticator),
             authentication_key: server_keypair,
             peer_public_key: None,
             additional_data: vec![],
         };
-        let mut server_session = Session::new(server_config, false).unwrap();
+        let mut server_session = MessageFactory::new(server_config, false).unwrap();
 
         // client
         let authenticator = NaiveAuthenticator{};
         let client_keypair = PrivateKey::generate(&mut r).unwrap();
-        let client_config = SessionConfig {
+        let client_config = MessageFactoryConfig {
             authenticator: Box::new(authenticator),
             authentication_key: client_keypair,
             peer_public_key: Some(server_keypair.public_key()),
             additional_data: vec![],
         };
-        let mut client_session = Session::new(client_config, true).unwrap();
+        let mut client_session = MessageFactory::new(client_config, true).unwrap();
 
         // handshake phase
         let client_mesg1 = client_session.client_handshake1().unwrap();

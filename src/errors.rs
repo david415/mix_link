@@ -83,7 +83,7 @@ impl Error for CommandError {
 #[derive(Debug)]
 pub enum HandshakeError {
     NoPeerKeyError,
-    SessionCreateError,
+    MessageFactoryCreateError,
     InvalidStateError,
     ClientHandshakeNoise1Error,
     ClientHandshakeNoise2Error,
@@ -108,7 +108,7 @@ impl fmt::Display for HandshakeError {
         use self::HandshakeError::*;
         match *self {
             NoPeerKeyError => write!(f, "No peer key was supplied, error."),
-            SessionCreateError => write!(f, "Failure creating session."),
+            MessageFactoryCreateError => write!(f, "Failure creating session."),
             InvalidStateError => write!(f, "Invalid session state error."),
             ClientHandshakeNoise1Error => write!(f, "Error preparing client handshake payload."),
             ClientHandshakeNoise2Error => write!(f, "Error preparing client handshake payload."),
@@ -140,7 +140,7 @@ impl Error for HandshakeError {
         use self::HandshakeError::*;
         match *self {
             NoPeerKeyError => None,
-            SessionCreateError => None,
+            MessageFactoryCreateError => None,
             InvalidStateError => None,
             ClientHandshakeNoise1Error => None,
             ClientHandshakeNoise2Error => None,

@@ -21,7 +21,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::any::Any;
 use byteorder::{ByteOrder, BigEndian};
 use subtle::ConstantTimeEq;
 use ecdh_wrapper::{KEY_SIZE, PublicKey};
@@ -160,12 +159,13 @@ impl Command {
             RETRIEVE_MESSAGE => return Ok(retrieve_message_from_bytes(_cmd).unwrap()),
             MESSAGE => return Ok(message_from_bytes(_cmd).unwrap()),
             GET_CONSENSUS => return Ok(get_consensus_from_bytes(_cmd).unwrap()),
+            CONSENSUS => return Ok(consensus_from_bytes(_cmd).unwrap()),
             POST_DESCRIPTOR => return Ok(post_descriptor_from_bytes(_cmd).unwrap()),
+            POST_DESCRIPTOR_STATUS => return Ok(post_descriptor_status_from_bytes(_cmd).unwrap()),
             VOTE => return Ok(vote_from_bytes(_cmd).unwrap()),
             VOTE_STATUS => return Ok(vote_status_from_bytes(_cmd).unwrap()),
             _ => return Err(CommandError::MessageDecodeError),
         }
-        return Err(CommandError::InvalidMessageType)
     }
 
     pub fn to_vec(self) -> Vec<u8> {
