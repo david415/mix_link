@@ -6,15 +6,14 @@ description = "message oriented noise based cryptographic link layer"
 keywords = ["cryptography", "noise", "network"]
 
 [dependencies]
-snow = { path = "../snow" }
-#snow = "0.1.8-preview"
-ecdh_wrapper = "0.0.0"
-#sphinxcrypto = "0.0.2"
+snow = { path = "../snow" } # XXX testing with a dev branch of snow
+ecdh_wrapper = { path = "../ecdh_wrapper" } # XXX test with dev branch
+byteorder = "1.2.2" # we use to encode in big endian
+subtle = "0.6.0" # constant time comparison
 sphinxcrypto = { path = "../rust-sphinxcrypto" }
-byteorder = "1.2.2"
-subtle = "0.6.0"
+rustc-serialize = "0.3.24" # XXX for debuging development
 
 [dev-dependencies]
-ecdh_wrapper = "0.0.0"
+ecdh_wrapper = { path = "../ecdh_wrapper" } # XXX
 rustc-serialize = "0.3.24"
-mockstream = "0.0.3"
+rand = "^0.4.2"

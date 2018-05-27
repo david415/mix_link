@@ -9,10 +9,10 @@
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -28,8 +28,9 @@ extern crate subtle;
 extern crate sphinxcrypto;
 
 pub mod commands;
-pub mod session;
-pub mod error;
+pub mod errors;
+pub mod messages;
+
 
 
 #[cfg(test)]
@@ -37,9 +38,15 @@ mod tests {
 
     extern crate rustc_serialize;
     extern crate ecdh_wrapper;
+    extern crate rand;
+
+    use super::*;
+    use self::rand::os::OsRng;
+    use self::rand::Rng;
 
     use snow::NoiseBuilder;
     use snow::params::NoiseParams;
+
     use self::rustc_serialize::hex::ToHex;
     use self::ecdh_wrapper::{PublicKey, PrivateKey};
 
@@ -48,9 +55,10 @@ mod tests {
     fn noise_test() {
         let noise_params: NoiseParams = "Noise_XX_25519_ChaChaPoly_BLAKE2b".parse().unwrap();
         let prologue = [0u8;1];
+        let mut r = OsRng::new().expect("failure to create an OS RNG");
 
         // server
-        let server_keypair = PrivateKey::generate().unwrap();
+        let server_keypair = PrivateKey::generate(&mut r).unwrap();
         let server_builder: NoiseBuilder = NoiseBuilder::new(noise_params.clone());
         let mut server_session = server_builder
             .local_private_key(&server_keypair.to_vec())
@@ -60,7 +68,7 @@ mod tests {
         let mut server_out = [0u8; 65535];
 
         // client
-        let client_keypair = PrivateKey::generate().unwrap();
+        let client_keypair = PrivateKey::generate(&mut r).unwrap();
         let client_builder: NoiseBuilder = NoiseBuilder::new(noise_params.clone());
         let mut client_session = client_builder
             .local_private_key(&client_keypair.to_vec())
@@ -71,11 +79,11 @@ mod tests {
         let mut client_in = [0u8; 65535];
 
         // handshake
-        let mut client_len = client_session.write_message(&[0u8; 0], &mut client_out).unwrap();
+        let mut client_len = client_session.write_message(&[0u8; 1], &mut client_out).unwrap();
         let mut server_len = server_session.read_message(&client_out[..client_len], &mut server_in).unwrap();
         println!("c -> s {}", client_len);
 
-        server_len = server_session.write_message(&[0u8; 0], &mut server_out).unwrap();
+        server_len = server_session.write_message(&[0u8; 1], &mut server_out).unwrap();
         client_len = client_session.read_message(&server_out[..server_len], &mut client_in).unwrap();
         println!("s -> c {}", server_len);
 

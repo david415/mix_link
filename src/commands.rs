@@ -33,7 +33,7 @@ use sphinxcrypto::constants::{FORWARD_PAYLOAD_SIZE,
                               SURB_SIZE,
                               USER_FORWARD_PAYLOAD_SIZE};
 
-use super::error::CommandError;
+use super::errors::CommandError;
 
 const CMD_OVERHEAD: usize = 1 + 1 + 4;
 

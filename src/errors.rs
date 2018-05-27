@@ -81,7 +81,7 @@ impl Error for CommandError {
 
 
 #[derive(Debug)]
-pub enum SessionError {
+pub enum HandshakeError {
     NoPeerKeyError,
     SessionCreateError,
     InvalidStateError,
@@ -100,11 +100,12 @@ pub enum SessionError {
     ServerHandshakeNoise3Error,
     ServerPrologueMismatchError,
     ServerAuthenticationError,
+    DataTransferFail,
 }
 
-impl fmt::Display for SessionError {
+impl fmt::Display for HandshakeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::SessionError::*;
+        use self::HandshakeError::*;
         match *self {
             NoPeerKeyError => write!(f, "No peer key was supplied, error."),
             SessionCreateError => write!(f, "Failure creating session."),
@@ -124,18 +125,19 @@ impl fmt::Display for SessionError {
             ServerHandshakeReceive2Error => write!(f, "Error receiving server handshake payload."),
             ServerPrologueMismatchError => write!(f, "Error server received wrong prologue from client."),
             ServerAuthenticationError => write!(f, "Error server failed to authenticate client."),
+            DataTransferFail => write!(f, "Error failed to switch to data transfer mode."),
         }
     }
 }
 
 
-impl Error for SessionError {
+impl Error for HandshakeError {
     fn description(&self) -> &str {
         "I'm a modem error."
     }
 
     fn cause(&self) -> Option<&Error> {
-        use self::SessionError::*;
+        use self::HandshakeError::*;
         match *self {
             NoPeerKeyError => None,
             SessionCreateError => None,
@@ -155,6 +157,67 @@ impl Error for SessionError {
             ServerHandshakeReceive2Error => None,
             ServerPrologueMismatchError => None,
             ServerAuthenticationError => None,
+            DataTransferFail => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum SendMessageError {
+    InvalidMessageSize,
+    EncryptFail,
+}
+
+impl fmt::Display for SendMessageError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::SendMessageError::*;
+        match *self {
+            InvalidMessageSize => write!(f, "Invalid message size."),
+            EncryptFail => write!(f, "Failure to encrypt."),
+        }
+    }
+}
+
+impl Error for SendMessageError {
+    fn description(&self) -> &str {
+        "I'm a modem error."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::SendMessageError::*;
+        match *self {
+            InvalidMessageSize => None,
+            EncryptFail => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ReceiveMessageError {
+    InvalidMessageSize,
+    DecryptFail,
+}
+
+impl fmt::Display for ReceiveMessageError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::ReceiveMessageError::*;
+        match *self {
+            InvalidMessageSize => write!(f, "Invalid message size."),
+            DecryptFail => write!(f, "Failure to encrypt."),
+        }
+    }
+}
+
+impl Error for ReceiveMessageError {
+    fn description(&self) -> &str {
+        "I'm a modem error."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::ReceiveMessageError::*;
+        match *self {
+            InvalidMessageSize => None,
+            DecryptFail => None,
         }
     }
 }
