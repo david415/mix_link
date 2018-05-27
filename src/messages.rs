@@ -51,7 +51,6 @@ const NOISE_HANDSHAKE_MESSAGE3_SIZE: usize = 64;
 const NOISE_MESSAGE_HEADER_SIZE: usize = MAC_SIZE + 4;
 
 
-
 struct AuthenticateMessage {
     additional_data: Vec<u8>,
     unix_time: u32,
@@ -380,9 +379,17 @@ mod tests {
         server_session = server_session.data_transfer().unwrap();
         client_session = client_session.data_transfer().unwrap();
 
-        let text = String::from("\"And 'Will to equality' -that itself shall henceforth be the name of virtue; and against everything that has power we will raise our outcry!\"");
-        let text_len = text.len();
-        let message = text.into_bytes();
+        let payload1 = String::from("\"And 'Will to equality' -that itself shall henceforth be the name of virtue; and against everything that has power we will raise our outcry!\"");
+        let text_len = payload1.len();
+        let message = payload1.into_bytes();
+        let ciphertext = server_session.encrypt_message(message.clone()).unwrap();
+        let message_len = client_session.decrypt_message_header(ciphertext.clone()).unwrap();
+        let plaintext = client_session.decrypt_message(ciphertext[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
+        assert_eq!(message, plaintext);
+
+        let payload2 = String::from("You preachers of equality, the tyrant-madness of impotence cries this in you for \"equality\": thus your most secret tyrant appetite disguies itself in words of virtue!");
+        let text_len = payload2.len();
+        let message = payload2.into_bytes();
         let ciphertext = server_session.encrypt_message(message.clone()).unwrap();
         let message_len = client_session.decrypt_message_header(ciphertext.clone()).unwrap();
         let plaintext = client_session.decrypt_message(ciphertext[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
