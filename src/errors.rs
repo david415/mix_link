@@ -82,6 +82,11 @@ impl Error for CommandError {
 
 #[derive(Debug)]
 pub enum HandshakeError {
+    ServerFailedToDecodeRemoteStatic,
+    ClientFailedToDecodeRemoteStatic,
+    ClientFailedToGetRemoteStatic,
+    ClientHandshakeInvalidAuthError,
+    InvalidNoiseSpecError,
     NoPeerKeyError,
     MessageFactoryCreateError,
     InvalidStateError,
@@ -107,6 +112,11 @@ impl fmt::Display for HandshakeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::HandshakeError::*;
         match *self {
+            ServerFailedToDecodeRemoteStatic => write!(f, "Server failed to decode the remote peer static key."),
+            ClientFailedToDecodeRemoteStatic => write!(f, "Client failed to decode the remote peer static key."),
+            ClientFailedToGetRemoteStatic => write!(f, "Client failed to get the remote peer static key."),
+            ClientHandshakeInvalidAuthError => write!(f, "Invalid auth message error."),
+            InvalidNoiseSpecError => write!(f, "Invalid noise protocol string."),
             NoPeerKeyError => write!(f, "No peer key was supplied, error."),
             MessageFactoryCreateError => write!(f, "Failure creating session."),
             InvalidStateError => write!(f, "Invalid session state error."),
@@ -139,6 +149,11 @@ impl Error for HandshakeError {
     fn cause(&self) -> Option<&Error> {
         use self::HandshakeError::*;
         match *self {
+            ServerFailedToDecodeRemoteStatic => None,
+            ClientFailedToDecodeRemoteStatic => None,
+            ClientFailedToGetRemoteStatic => None,
+            ClientHandshakeInvalidAuthError => None,
+            InvalidNoiseSpecError => None,
             NoPeerKeyError => None,
             MessageFactoryCreateError => None,
             InvalidStateError => None,

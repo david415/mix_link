@@ -27,7 +27,6 @@ extern crate ecdh_wrapper;
 use std::time::SystemTime;
 use subtle::ConstantTimeEq;
 use byteorder::{ByteOrder, BigEndian};
-use snow::params::NoiseParams;
 use snow::NoiseBuilder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
@@ -94,15 +93,7 @@ pub struct MessageFactoryConfig {
     pub additional_data: Vec<u8>,
 }
 
-#[derive(PartialEq, Eq)]
-enum SessionState {
-    Init,
-    Established,
-    Invalid,
-}
-
 pub struct MessageFactory {
-    initiator: bool,
     session: snow::Session,
     additional_data: Vec<u8>,
     authenticator: Box<PeerAuthenticator>,
@@ -110,7 +101,13 @@ pub struct MessageFactory {
 
 impl MessageFactory {
     pub fn new(session_config: MessageFactoryConfig, is_initiator: bool) -> Result<MessageFactory, HandshakeError> {
-        let noise_params: NoiseParams = NOISE_PARAMS.parse().unwrap();
+        let noise_params;
+        match NOISE_PARAMS.parse() {
+            Ok(x) => {
+                noise_params = x;
+            },
+            Err(_) => return Err(HandshakeError::InvalidNoiseSpecError),
+        }
         let noise_builder: NoiseBuilder = NoiseBuilder::new(noise_params);
         let session: snow::Session;
         if is_initiator {
@@ -137,7 +134,6 @@ impl MessageFactory {
             };
         }
         let _s = MessageFactory {
-            initiator: is_initiator,
             additional_data: session_config.additional_data,
             authenticator: session_config.authenticator,
             session: session,
@@ -178,10 +174,19 @@ impl MessageFactory {
             Ok(x) => x,
             Err(_) => return Err(HandshakeError::ClientHandshakeNoise2Error),
         };
-        let auth_msg = authenticate_message_from_bytes(&_raw_auth).unwrap();
-        let raw_peer_key = self.session.get_remote_static().unwrap();
+        let auth_msg = match authenticate_message_from_bytes(&_raw_auth) {
+            Ok(x) => x,
+            Err(_) => return Err(HandshakeError::ClientHandshakeInvalidAuthError),
+        };
+        let raw_peer_key = match self.session.get_remote_static() {
+            Some(x) => x,
+            None => return Err(HandshakeError::ClientFailedToGetRemoteStatic),
+        };
         let mut peer_key = PublicKey::default();
-        peer_key.from_bytes(raw_peer_key);
+        match peer_key.from_bytes(raw_peer_key) {
+            Ok(_x) => {},
+            Err(_y) => return Err(HandshakeError::ClientFailedToDecodeRemoteStatic),
+        }
         let peer_credentials = PeerCredentials {
             additional_data: auth_msg.additional_data,
             public_key: peer_key,
@@ -233,7 +238,10 @@ impl MessageFactory {
         let peer_auth = authenticate_message_from_bytes(&raw_auth).unwrap();
         let raw_peer_key = self.session.get_remote_static().unwrap();
         let mut peer_key = PublicKey::default();
-        peer_key.from_bytes(raw_peer_key);
+        match peer_key.from_bytes(raw_peer_key) {
+            Ok(_) => {},
+            Err(_) => return Err(HandshakeError::ServerFailedToDecodeRemoteStatic),
+        }
         let peer_credentials = PeerCredentials {
             additional_data: peer_auth.additional_data,
             public_key: peer_key,
@@ -322,16 +330,15 @@ impl MessageFactory {
 #[cfg(test)]
 mod tests {
     extern crate rand;
-    extern crate rustc_serialize;
+    //extern crate rustc_serialize;
 
-    use self::rustc_serialize::hex::ToHex;
+    //use self::rustc_serialize::hex::ToHex;
     use super::*;
-    use self::rand::{Rng};
     use self::rand::os::OsRng;
 
     struct NaiveAuthenticator {}
     impl PeerAuthenticator for NaiveAuthenticator {
-        fn is_peer_valid(&self, peer_credentials: &PeerCredentials) -> bool {
+        fn is_peer_valid(&self, _peer_credentials: &PeerCredentials) -> bool {
             return true;
         }
     }
@@ -374,18 +381,16 @@ mod tests {
         client_session = client_session.data_transfer().unwrap();
 
         let payload1 = String::from("\"And 'Will to equality' -that itself shall henceforth be the name of virtue; and against everything that has power we will raise our outcry!\"");
-        let text_len = payload1.len();
         let message = payload1.into_bytes();
         let ciphertext = server_session.encrypt_message(message.clone()).unwrap();
-        let message_len = client_session.decrypt_message_header(ciphertext.clone()).unwrap();
+        let _message_len = client_session.decrypt_message_header(ciphertext.clone()).unwrap();
         let plaintext = client_session.decrypt_message(ciphertext[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
         assert_eq!(message, plaintext);
 
         let payload2 = String::from("You preachers of equality, the tyrant-madness of impotence cries this in you for \"equality\": thus your most secret tyrant appetite disguies itself in words of virtue!");
-        let text_len = payload2.len();
         let message = payload2.into_bytes();
         let ciphertext = server_session.encrypt_message(message.clone()).unwrap();
-        let message_len = client_session.decrypt_message_header(ciphertext.clone()).unwrap();
+        let _message_len = client_session.decrypt_message_header(ciphertext.clone()).unwrap();
         let plaintext = client_session.decrypt_message(ciphertext[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
         assert_eq!(message, plaintext);
     }

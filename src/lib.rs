@@ -36,19 +36,17 @@ pub mod messages;
 #[cfg(test)]
 mod tests {
 
-    extern crate rustc_serialize;
+    //extern crate rustc_serialize;
     extern crate ecdh_wrapper;
     extern crate rand;
 
-    use super::*;
     use self::rand::os::OsRng;
-    use self::rand::Rng;
 
     use snow::NoiseBuilder;
     use snow::params::NoiseParams;
 
-    use self::rustc_serialize::hex::ToHex;
-    use self::ecdh_wrapper::{PublicKey, PrivateKey};
+    //use self::rustc_serialize::hex::ToHex;
+    use self::ecdh_wrapper::PrivateKey;
 
 
     #[test]
@@ -79,17 +77,17 @@ mod tests {
         let mut client_in = [0u8; 65535];
 
         // handshake
-        let mut client_len = client_session.write_message(&[0u8; 1], &mut client_out).unwrap();
-        let mut server_len = server_session.read_message(&client_out[..client_len], &mut server_in).unwrap();
-        println!("c -> s {}", client_len);
+        let mut _client_len = client_session.write_message(&[0u8; 1], &mut client_out).unwrap();
+        let mut _server_len = server_session.read_message(&client_out[.._client_len], &mut server_in).unwrap();
+        println!("c -> s {}", _client_len);
 
-        server_len = server_session.write_message(&[0u8; 1], &mut server_out).unwrap();
-        client_len = client_session.read_message(&server_out[..server_len], &mut client_in).unwrap();
-        println!("s -> c {}", server_len);
+        _server_len = server_session.write_message(&[0u8; 1], &mut server_out).unwrap();
+        _client_len = client_session.read_message(&server_out[.._server_len], &mut client_in).unwrap();
+        println!("s -> c {}", _server_len);
 
-        client_len = client_session.write_message(&[], &mut client_out).unwrap();
-        server_session.read_message(&client_out[..client_len], &mut server_in).unwrap();
-        println!("c -> s {}", client_len);
+        _client_len = client_session.write_message(&[], &mut client_out).unwrap();
+        server_session.read_message(&client_out[.._client_len], &mut server_in).unwrap();
+        println!("c -> s {}", _client_len);
 
         // data transfer
         client_session = client_session.into_transport_mode().unwrap();
@@ -97,14 +95,14 @@ mod tests {
 
         // server talks to client
         let server_banner = b"yo";
-        server_len = server_session.write_message(server_banner, &mut server_out).unwrap();
-        client_session.read_message(&server_out[..server_len], &mut client_in).unwrap();
+        _server_len = server_session.write_message(server_banner, &mut server_out).unwrap();
+        client_session.read_message(&server_out[.._server_len], &mut client_in).unwrap();
         assert_eq!(&client_in[..server_banner.len()], server_banner);
 
         // client talks to server
         let client_response = b"ho";
-        client_len = client_session.write_message(client_response, &mut client_out).unwrap();
-        server_session.read_message(&client_out[..client_len], &mut server_in).unwrap();
+        _client_len = client_session.write_message(client_response, &mut client_out).unwrap();
+        server_session.read_message(&client_out[.._client_len], &mut server_in).unwrap();
         assert_eq!(client_response, &server_in[..client_response.len()]);
     }
 }
