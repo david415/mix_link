@@ -90,7 +90,7 @@ pub struct MessageFactory {
 }
 
 impl MessageFactory {
-    pub fn new(session_config: MessageFactoryConfig, is_initiator: bool) -> Result<MessageFactory, HandshakeError> {
+    pub fn new(config: MessageFactoryConfig, is_initiator: bool) -> Result<MessageFactory, HandshakeError> {
         let noise_params;
         match NOISE_PARAMS.parse() {
             Ok(x) => {
@@ -101,12 +101,12 @@ impl MessageFactory {
         let noise_builder: NoiseBuilder = NoiseBuilder::new(noise_params);
         let session: snow::Session;
         if is_initiator {
-            if !session_config.peer_public_key.is_some() {
+            if !config.peer_public_key.is_some() {
                 return Err(HandshakeError::NoPeerKeyError);
             }
             let _match = noise_builder
-                .local_private_key(&session_config.authentication_key.to_vec())
-                .remote_public_key(&(session_config.peer_public_key.unwrap()).to_vec())
+                .local_private_key(&config.authentication_key.to_vec())
+                .remote_public_key(&(config.peer_public_key.unwrap()).to_vec())
                 .prologue(&PROLOGUE)
                 .build_initiator();
             session = match _match {
@@ -115,7 +115,7 @@ impl MessageFactory {
             };
         } else {
             let _match = noise_builder
-                .local_private_key(&session_config.authentication_key.to_vec())
+                .local_private_key(&config.authentication_key.to_vec())
                 .prologue(&PROLOGUE)
                 .build_responder();
             session = match _match {
@@ -124,8 +124,8 @@ impl MessageFactory {
             };
         }
         let _s = MessageFactory {
-            additional_data: session_config.additional_data,
-            authenticator: session_config.authenticator,
+            additional_data: config.additional_data,
+            authenticator: config.authenticator,
             session: session,
         };
         Ok(_s)
