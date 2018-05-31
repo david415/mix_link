@@ -58,10 +58,6 @@ impl ClientSession {
         return Ok(self.message_factory.client_handshake1()?.to_vec());
     }
 
-    pub fn handshake2(&mut self) -> Result<Vec<u8>, HandshakeError> {
-        return Ok(self.message_factory.client_handshake2()?.to_vec());
-    }
-
     pub fn sent_handshake1(&mut self) {
         self.state = ClientState::SentHandshake1;
     }
@@ -70,23 +66,45 @@ impl ClientSession {
         self.state = ClientState::DataTransfer;
     }
 
-    pub fn process_handshake1(&mut self, bytes: Vec<u8>) -> Result<Vec<u8>, HandshakeError> {
+    pub fn handshake2(&mut self) -> Result<Vec<u8>, HandshakeError> {
+        return Ok(self.message_factory.client_handshake2()?.to_vec());
+    }
+
+    pub fn process_handshake1(&mut self, bytes: Vec<u8>) -> Result<(), HandshakeError> {
         if bytes.len() != NOISE_HANDSHAKE_MESSAGE2_SIZE {
             return Err(HandshakeError::InvalidStateError)
         }
         let mut message = [0u8; NOISE_HANDSHAKE_MESSAGE2_SIZE];
         message.copy_from_slice(&bytes);
         self.message_factory.client_read_handshake1(message)?;
-        let mesg = self.message_factory.client_handshake2()?.to_vec();
         self.state = ClientState::ReceivedHandshake1;
-        return Ok(mesg);
+        return Ok(());
+    }
+
+    pub fn decrypt_message(&mut self, ciphertext: Vec<u8>) -> Result<Vec<u8>, ReceiveMessageError> {
+        let ciphertext_len = ciphertext.len();
+        let message_size = self.message_factory.decrypt_message_header(ciphertext.clone())?;
+        if (ciphertext_len - 4) as u32 != message_size {
+            return Err(ReceiveMessageError::InvalidMessageSize);
+        }
+        return Ok(self.message_factory.decrypt_message(ciphertext[4..].to_vec())?);
     }
 
     pub fn received(&mut self, message: Vec<u8>) -> Result<(), HandshakeError> {
         match self.state {
             ClientState::SentHandshake1 => {
-                let to_send = self.process_handshake1(message)?;
-                self.output_messages.push(to_send);
+                self.process_handshake1(message)?;
+                return Ok(());
+            },
+            ClientState::DataTransfer => {
+                let cmd_bytes = match self.decrypt_message(message) {
+                    Ok(x) => x,
+                    Err(_) => return Err(HandshakeError::InvalidStateError), // XXX
+                };
+                match Command::from_bytes(&cmd_bytes) {
+                    Ok(cmd) => self.input_commands.push(cmd),
+                    Err(_) => return Err(HandshakeError::InvalidStateError), // XXX
+                }
                 return Ok(());
             },
             _ => return Err(HandshakeError::InvalidStateError),
@@ -162,6 +180,10 @@ impl ServerSession {
         return Ok(to_send.to_vec())
     }
 
+    pub fn sent_handshake1(&mut self) {
+        self.state = ServerState::SentHandshake1;
+    }
+
     pub fn process_handshake2(&mut self, bytes: Vec<u8>) -> Result<(), HandshakeError> {
         if bytes.len() != NOISE_HANDSHAKE_MESSAGE3_SIZE {
             return Err(HandshakeError::InvalidStateError)
@@ -183,15 +205,7 @@ impl ServerSession {
     }
 
     pub fn encrypt_message(&mut self, plaintext: Vec<u8>) -> Result<Vec<u8>, SendMessageError> {
-        let mut header_plaintext = [0u8; 4];
-        let _plaintext_len = plaintext.len();
-        BigEndian::write_u32(&mut header_plaintext, _plaintext_len as u32 - 4);
-        let header = self.message_factory.encrypt_message(header_plaintext.to_vec())?;
-        let body = self.message_factory.encrypt_message(plaintext[4..].to_vec())?;
-        let mut ciphertext = Vec::new();
-        ciphertext.extend_from_slice(&header);
-        ciphertext.extend_from_slice(&body);
-        return Ok(ciphertext);
+        return Ok(self.message_factory.encrypt_message(plaintext)?);
     }
 }
 
@@ -249,12 +263,26 @@ mod tests {
 
         // s -> c
         let server_handshake1 = server_session.get_output_message();
-        println!("server handshake1 {}", server_handshake1.to_hex());
+        server_session.sent_handshake1();
         client_session.received(server_handshake1).unwrap();
 
         // c -> s
-        //let client_handshake2 = client_session.handshake2().unwrap();
-        //client_session.sent_handshake2();
-        //server_session.received(client_handshake2).unwrap();
+        let client_handshake2 = client_session.handshake2().unwrap();
+        client_session.sent_handshake2();
+        server_session.received(client_handshake2).unwrap();
+
+        // data transfer phase
+        server_session.message_factory = server_session.message_factory.data_transfer().unwrap();
+        client_session.message_factory = client_session.message_factory.data_transfer().unwrap();
+
+        // s -> c
+        let cmd = Command::MessageMessage {
+            queue_size_hint: 0u8,
+            sequence: 0u32,
+            payload: vec![123],
+        };
+        //let server_message = cmd.to_vec();
+        //let to_send = server_session.encrypt_message(server_message).unwrap();
+        //client_session.received(to_send).unwrap();
     }
 }

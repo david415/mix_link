@@ -133,14 +133,13 @@ impl MessageFactory {
 
     pub fn client_handshake1(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE1_SIZE], HandshakeError> {
         let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
-        let _match = self.session.write_message(&PROLOGUE, &mut msg);
-        let mut _len = match _match {
+        let _len = match self.session.write_message(&[0u8;0], &mut msg) {
             Ok(x) => x,
             Err(_) => return Err(HandshakeError::ClientHandshakeNoise1Error),
         };
-        assert_eq!(NOISE_HANDSHAKE_MESSAGE1_SIZE, _len);
         let mut msg1 = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
-        msg1.copy_from_slice(&msg[..NOISE_HANDSHAKE_MESSAGE1_SIZE]);
+        msg1[0] = PROLOGUE[0];
+        msg1[PROLOGUE_SIZE..].copy_from_slice(&msg[.._len]);
         return Ok(msg1);
     }
 
@@ -188,16 +187,14 @@ impl MessageFactory {
     }
     
     pub fn server_read_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE1_SIZE]) -> Result<(), HandshakeError> {
-        if message[NOISE_HANDSHAKE_MESSAGE1_SIZE-1..NOISE_HANDSHAKE_MESSAGE1_SIZE].ct_eq(&PROLOGUE).unwrap_u8() == 0 {
+        if message[0..PROLOGUE_SIZE].ct_eq(&PROLOGUE).unwrap_u8() == 0 {
             return Err(HandshakeError::ServerPrologueMismatchError);
         }
         let mut _msg1p = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
-        let _match = self.session.read_message(&message, &mut _msg1p);
-        let mut _len = match _match {
+        let _len = match self.session.read_message(&message[PROLOGUE_SIZE..], &mut _msg1p) {
             Ok(x) => x,
             Err(_) => return Err(HandshakeError::ServerHandshakeNoise1Error),
         };
-        assert_eq!(PROLOGUE_SIZE, _len);
         return Ok(());
     }
 
@@ -334,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn session_handshake_test() {
+    fn message_handshake_test() {
         // server
         let mut r = OsRng::new().expect("failure to create an OS RNG");
         let server_keypair = PrivateKey::generate(&mut r).unwrap();

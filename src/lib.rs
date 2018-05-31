@@ -78,11 +78,11 @@ mod tests {
         let mut client_in = [0u8; 65535];
 
         // handshake
-        let mut _client_len = client_session.write_message(&[0u8; 1], &mut client_out).unwrap();
+        let mut _client_len = client_session.write_message(&[0u8; 0], &mut client_out).unwrap();
         let mut _server_len = server_session.read_message(&client_out[.._client_len], &mut server_in).unwrap();
         println!("c -> s {}", _client_len);
 
-        _server_len = server_session.write_message(&[0u8; 1], &mut server_out).unwrap();
+        _server_len = server_session.write_message(&[0u8; 0], &mut server_out).unwrap();
         _client_len = client_session.read_message(&server_out[.._server_len], &mut client_in).unwrap();
         println!("s -> c {}", _server_len);
 
