@@ -26,6 +26,9 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum CommandError {
+    InvalidLengthError,
+    InvalidReservedByte,
+    TooSmallError,
     GetConsensusDecodeError,
     ConsensusDecodeError,
     PostDescriptorDecodeError,
@@ -42,6 +45,9 @@ impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::CommandError::*;
         match *self {
+            InvalidLengthError => write!(f, "Invalid length."),
+            InvalidReservedByte => write!(f, "Reserved byte is invalid."),
+            TooSmallError => write!(f, "Command is too small."),
             GetConsensusDecodeError => write!(f, "Failed to decode a Get Consensus command."),
             ConsensusDecodeError => write!(f, "Failed to decode a Consensus command."),
             PostDescriptorDecodeError => write!(f, "Failed to decode a PostDescriptor command."),
@@ -65,6 +71,9 @@ impl Error for CommandError {
     fn cause(&self) -> Option<&Error> {
         use self::CommandError::*;
         match *self {
+            InvalidLengthError => None,
+            InvalidReservedByte => None,
+            TooSmallError => None,
             GetConsensusDecodeError => None,
             ConsensusDecodeError => None,
             PostDescriptorDecodeError => None,
