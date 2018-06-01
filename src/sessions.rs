@@ -21,11 +21,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use byteorder::{ByteOrder, BigEndian};
+use sphinxcrypto::constants::USER_FORWARD_PAYLOAD_SIZE;
 
 use super::messages::{MessageFactory, MessageFactoryConfig};
 use super::errors::{HandshakeError, ReceiveMessageError, SendMessageError};
-use super::constants::{NOISE_HANDSHAKE_MESSAGE1_SIZE, NOISE_HANDSHAKE_MESSAGE2_SIZE, NOISE_HANDSHAKE_MESSAGE3_SIZE};
+use super::constants::{NOISE_MESSAGE_HEADER_SIZE, NOISE_HANDSHAKE_MESSAGE1_SIZE,
+                       NOISE_HANDSHAKE_MESSAGE2_SIZE, NOISE_HANDSHAKE_MESSAGE3_SIZE};
 use super::commands::Command;
 
 pub enum ClientState {
@@ -81,13 +82,17 @@ impl ClientSession {
         return Ok(());
     }
 
+    pub fn encrypt_message(&mut self, plaintext: Vec<u8>) -> Result<Vec<u8>, SendMessageError> {
+        return Ok(self.message_factory.encrypt_message(plaintext)?);
+    }
+
     pub fn decrypt_message(&mut self, ciphertext: Vec<u8>) -> Result<Vec<u8>, ReceiveMessageError> {
         let ciphertext_len = ciphertext.len();
         let message_size = self.message_factory.decrypt_message_header(ciphertext.clone())?;
-        if (ciphertext_len - 4) as u32 != message_size {
+        if (ciphertext_len - NOISE_MESSAGE_HEADER_SIZE) as u32 != message_size {
             return Err(ReceiveMessageError::InvalidMessageSize);
         }
-        return Ok(self.message_factory.decrypt_message(ciphertext[4..].to_vec())?);
+        return Ok(self.message_factory.decrypt_message(ciphertext[NOISE_MESSAGE_HEADER_SIZE..].to_vec())?);
     }
 
     pub fn received(&mut self, message: Vec<u8>) -> Result<(), HandshakeError> {
@@ -99,11 +104,15 @@ impl ClientSession {
             ClientState::DataTransfer => {
                 let cmd_bytes = match self.decrypt_message(message) {
                     Ok(x) => x,
-                    Err(_) => return Err(HandshakeError::InvalidStateError), // XXX
+                    Err(_) => {
+                        return Err(HandshakeError::InvalidStateError);
+                    }, // XXX
                 };
                 match Command::from_bytes(&cmd_bytes) {
                     Ok(cmd) => self.input_commands.push(cmd),
-                    Err(_) => return Err(HandshakeError::InvalidStateError), // XXX
+                    Err(_) => {
+                        return Err(HandshakeError::InvalidStateError);
+                    }, // XXX
                 }
                 return Ok(());
             },
@@ -198,10 +207,10 @@ impl ServerSession {
     pub fn decrypt_message(&mut self, ciphertext: Vec<u8>) -> Result<Vec<u8>, ReceiveMessageError> {
         let ciphertext_len = ciphertext.len();
         let message_size = self.message_factory.decrypt_message_header(ciphertext.clone())?;
-        if (ciphertext_len - 4) as u32 != message_size {
+        if (ciphertext_len - NOISE_MESSAGE_HEADER_SIZE) as u32 != message_size {
             return Err(ReceiveMessageError::InvalidMessageSize);
         }
-        return Ok(self.message_factory.decrypt_message(ciphertext[4..].to_vec())?);
+        return Ok(self.message_factory.decrypt_message(ciphertext[NOISE_MESSAGE_HEADER_SIZE..].to_vec())?);
     }
 
     pub fn encrypt_message(&mut self, plaintext: Vec<u8>) -> Result<Vec<u8>, SendMessageError> {
@@ -276,13 +285,20 @@ mod tests {
         client_session.message_factory = client_session.message_factory.data_transfer().unwrap();
 
         // s -> c
-        let cmd = Command::MessageMessage {
+        let server_cmd = Command::MessageMessage {
             queue_size_hint: 0u8,
             sequence: 0u32,
-            payload: vec![123],
+            payload: vec![0u8; USER_FORWARD_PAYLOAD_SIZE],
         };
-        //let server_message = cmd.to_vec();
-        //let to_send = server_session.encrypt_message(server_message).unwrap();
-        //client_session.received(to_send).unwrap();
+        let server_message = server_cmd.clone().to_vec();
+        let to_send = server_session.encrypt_message(server_message).unwrap();
+        client_session.received(to_send).unwrap();
+        assert_eq!(server_cmd, client_session.input_commands[0]);
+
+        let client_cmd = Command::NoOp{};
+        let client_message = client_cmd.clone().to_vec();
+        let client_to_send = client_session.encrypt_message(client_message).unwrap();
+        server_session.received(client_to_send).unwrap();
+        assert_eq!(client_cmd, server_session.input_commands[0]);
     }
 }

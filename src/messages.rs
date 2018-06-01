@@ -264,6 +264,7 @@ impl MessageFactory {
         match _result {
             Ok(x) => {
                 _header_len = x;
+                println!("ciphertext header len is {}", _header_len);
             },
             Err(_) => {
                 return Err(SendMessageError::EncryptFail)
@@ -292,7 +293,7 @@ impl MessageFactory {
         match _result {
             Ok(x) => {
                 assert_eq!(x, 4);
-                return Ok(BigEndian::read_u32(&ciphertext_header[..NOISE_MESSAGE_HEADER_SIZE]));
+                return Ok(BigEndian::read_u32(&ciphertext_header[..x]));
             },
             Err(_) => {
                 return Err(ReceiveMessageError::DecryptFail);
