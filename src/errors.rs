@@ -1,4 +1,4 @@
-// error.rs - noise based wire protocol errors
+// errors.rs - noise based wire protocol errors
 // Copyright (C) 2018  David Anthony Stainton.
 //
 // MIT License
@@ -26,6 +26,7 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum CommandError {
+    InvalidNoiseSpecError,
     InvalidLengthError,
     InvalidReservedByte,
     TooSmallError,
@@ -45,6 +46,7 @@ impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::CommandError::*;
         match *self {
+            InvalidNoiseSpecError => write!(f, "Invalid noise protocol string."),
             InvalidLengthError => write!(f, "Invalid length."),
             InvalidReservedByte => write!(f, "Reserved byte is invalid."),
             TooSmallError => write!(f, "Command is too small."),
@@ -62,7 +64,6 @@ impl fmt::Display for CommandError {
     }
 }
 
-
 impl Error for CommandError {
     fn description(&self) -> &str {
         "I'm a modem error."
@@ -71,6 +72,7 @@ impl Error for CommandError {
     fn cause(&self) -> Option<&Error> {
         use self::CommandError::*;
         match *self {
+            InvalidNoiseSpecError => None,
             InvalidLengthError => None,
             InvalidReservedByte => None,
             TooSmallError => None,
@@ -88,100 +90,125 @@ impl Error for CommandError {
     }
 }
 
-
 #[derive(Debug)]
-pub enum HandshakeError {
-    ServerFailedToDecodeRemoteStatic,
-    ClientFailedToDecodeRemoteStatic,
-    ClientFailedToGetRemoteStatic,
-    ClientHandshakeInvalidAuthError,
+pub enum ClientHandshakeError {
     InvalidNoiseSpecError,
     NoPeerKeyError,
-    MessageFactoryCreateError,
+    SessionCreateError,
+    Noise1WriteError,
+    Noise2ReadError,
+    Noise3WriteError,
+    SentHandshake1InvalidState,
+    InitiateDataTransferError,
+    AuthenticationError,
+    FailedToGetRemoteStatic,
+    FailedToDecodeRemoteStatic,
     InvalidStateError,
-    ClientHandshakeNoise1Error,
-    ClientHandshakeNoise2Error,
-    ClientHandshakeNoise3Error,
-    ClientHandshakeSend1Error,
-    ClientHandshakeSend2Error,
-    ClientHandshakeReceiveError,
-    ClientAuthenticationError,
-    ServerHandshakeReceive1Error,
-    ServerHandshakeReceive2Error,
-    ServerHandshakeSendError,
-    ServerHandshakeNoise1Error,
-    ServerHandshakeNoise2Error,
-    ServerHandshakeNoise3Error,
-    ServerPrologueMismatchError,
-    ServerAuthenticationError,
-    DataTransferFail,
 }
 
-impl fmt::Display for HandshakeError {
+impl fmt::Display for ClientHandshakeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::HandshakeError::*;
+        use self::ClientHandshakeError::*;
         match *self {
-            ServerFailedToDecodeRemoteStatic => write!(f, "Server failed to decode the remote peer static key."),
-            ClientFailedToDecodeRemoteStatic => write!(f, "Client failed to decode the remote peer static key."),
-            ClientFailedToGetRemoteStatic => write!(f, "Client failed to get the remote peer static key."),
-            ClientHandshakeInvalidAuthError => write!(f, "Invalid auth message error."),
             InvalidNoiseSpecError => write!(f, "Invalid noise protocol string."),
-            NoPeerKeyError => write!(f, "No peer key was supplied, error."),
-            MessageFactoryCreateError => write!(f, "Failure creating session."),
-            InvalidStateError => write!(f, "Invalid session state error."),
-            ClientHandshakeNoise1Error => write!(f, "Error preparing client handshake payload."),
-            ClientHandshakeNoise2Error => write!(f, "Error preparing client handshake payload."),
-            ClientHandshakeNoise3Error => write!(f, "Error preparing client handshake payload."),
-            ClientHandshakeSend1Error => write!(f, "Error sending client handshake payload."),
-            ClientHandshakeSend2Error => write!(f, "Error sending client handshake payload."),
-            ClientHandshakeReceiveError => write!(f, "Error receiving client handshake payload."),
-            ClientAuthenticationError => write!(f, "Error authenticating peer."),
-            ServerHandshakeNoise1Error => write!(f, "Error preparing server handshake payload."),
-            ServerHandshakeNoise2Error => write!(f, "Error preparing server handshake payload."),
-            ServerHandshakeNoise3Error => write!(f, "Error preparing server handshake payload."),
-            ServerHandshakeSendError => write!(f, "Error sending server handshake payload."),
-            ServerHandshakeReceive1Error => write!(f, "Error receiving server handshake payload."),
-            ServerHandshakeReceive2Error => write!(f, "Error receiving server handshake payload."),
-            ServerPrologueMismatchError => write!(f, "Error server received wrong prologue from client."),
-            ServerAuthenticationError => write!(f, "Error server failed to authenticate client."),
-            DataTransferFail => write!(f, "Error failed to switch to data transfer mode."),
+            NoPeerKeyError => write!(f, "No peer key was supplied."),
+            SessionCreateError => write!(f, "Session creation failure."),
+            Noise1WriteError => write!(f, "Failed to write first noise handshake message."),
+            Noise2ReadError => write!(f, "Failed to read second noise handshake message."),
+            Noise3WriteError => write!(f, "Failed to write third noise handshake message."),
+            SentHandshake1InvalidState => write!(f, "SentHandshake1 called for an invalid state."),
+            InitiateDataTransferError => write!(f, "Initiate Data Transfer called for an invalid state."),
+            AuthenticationError => write!(f, "Invalid authentication received."),
+            FailedToGetRemoteStatic => write!(f, "Failed to get remote static key."),
+            FailedToDecodeRemoteStatic => write!(f, "Failed to decode remote static key."),
+            InvalidStateError => write!(f, "Invalid state transition."),
         }
     }
 }
 
-
-impl Error for HandshakeError {
+impl Error for ClientHandshakeError {
     fn description(&self) -> &str {
         "I'm a modem error."
     }
 
     fn cause(&self) -> Option<&Error> {
-        use self::HandshakeError::*;
+        use self::ClientHandshakeError::*;
         match *self {
-            ServerFailedToDecodeRemoteStatic => None,
-            ClientFailedToDecodeRemoteStatic => None,
-            ClientFailedToGetRemoteStatic => None,
-            ClientHandshakeInvalidAuthError => None,
             InvalidNoiseSpecError => None,
             NoPeerKeyError => None,
-            MessageFactoryCreateError => None,
+            SessionCreateError => None,
+            Noise1WriteError => None,
+            Noise2ReadError => None,
+            Noise3WriteError => None,
+            SentHandshake1InvalidState => None,
+            InitiateDataTransferError => None,
+            AuthenticationError => None,
+            FailedToGetRemoteStatic => None,
+            FailedToDecodeRemoteStatic => None,
             InvalidStateError => None,
-            ClientHandshakeNoise1Error => None,
-            ClientHandshakeNoise2Error => None,
-            ClientHandshakeNoise3Error => None,
-            ClientHandshakeSend1Error => None,
-            ClientHandshakeSend2Error => None,
-            ClientHandshakeReceiveError => None,
-            ClientAuthenticationError => None,
-            ServerHandshakeNoise1Error => None,
-            ServerHandshakeNoise2Error => None,
-            ServerHandshakeNoise3Error => None,
-            ServerHandshakeSendError => None,
-            ServerHandshakeReceive1Error => None,
-            ServerHandshakeReceive2Error => None,
-            ServerPrologueMismatchError => None,
-            ServerAuthenticationError => None,
-            DataTransferFail => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ServerHandshakeError {
+    PrologueMismatchError,
+    InvalidNoiseSpecError,
+    NoPeerKeyError,
+    SessionCreateError,
+    Noise1ReadError,
+    Noise2WriteError,
+    Noise3ReadError,
+    SentHandshake1InvalidState,
+    InitiateDataTransferError,
+    AuthenticationError,
+    FailedToGetRemoteStatic,
+    FailedToDecodeRemoteStatic,
+    InvalidStateError,
+}
+
+impl fmt::Display for ServerHandshakeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::ServerHandshakeError::*;
+        match *self {
+            PrologueMismatchError => write!(f, "Prologue mismatch error."),
+            InvalidNoiseSpecError => write!(f, "Invalid noise protocol string."),
+            NoPeerKeyError => write!(f, "No peer key was supplied."),
+            SessionCreateError => write!(f, "Session creation failure."),
+            Noise1ReadError => write!(f, "Failed to write first noise handshake message."),
+            Noise2WriteError => write!(f, "Failed to read second noise handshake message."),
+            Noise3ReadError => write!(f, "Failed to write third noise handshake message."),
+            SentHandshake1InvalidState => write!(f, "SentHandshake1 called for an invalid state."),
+            InitiateDataTransferError => write!(f, "Initiate Data Transfer called for an invalid state."),
+            AuthenticationError => write!(f, "Invalid authentication received."),
+            FailedToGetRemoteStatic => write!(f, "Failed to get remote static key."),
+            FailedToDecodeRemoteStatic => write!(f, "Failed to decode remote static key."),
+            InvalidStateError => write!(f, "Invalid state transition."),
+        }
+    }
+}
+
+impl Error for ServerHandshakeError {
+    fn description(&self) -> &str {
+        "I'm a modem error."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::ServerHandshakeError::*;
+        match *self {
+            PrologueMismatchError => None,
+            InvalidNoiseSpecError => None,
+            NoPeerKeyError => None,
+            SessionCreateError => None,
+            Noise1ReadError => None,
+            Noise2WriteError => None,
+            Noise3ReadError => None,
+            SentHandshake1InvalidState => None,
+            InitiateDataTransferError => None,
+            AuthenticationError => None,
+            FailedToGetRemoteStatic => None,
+            FailedToDecodeRemoteStatic => None,
+            InvalidStateError => None,
         }
     }
 }

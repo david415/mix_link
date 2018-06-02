@@ -2,18 +2,16 @@
 name = "modem"
 version = "0.1.0"
 authors = ["David Stainton <dstainton415@gmail.com>"]
-description = "message oriented noise based cryptographic link layer"
-keywords = ["cryptography", "noise", "network"]
+description = "message oriented noise based cryptographic link layer for mixnets"
+keywords = ["cryptography", "noise", "network", "mixnet"]
 
 [dependencies]
-snow = { path = "../snow" } # XXX testing with a dev branch of snow
-ecdh_wrapper = { path = "../ecdh_wrapper" } # XXX test with dev branch
-byteorder = "1.2.2" # we use to encode in big endian
-subtle = "0.6.0" # constant time comparison
-sphinxcrypto = { path = "../rust-sphinxcrypto" }
-rustc-serialize = "0.3.24" # XXX for debuging development
+snow = "0.1.12"
+ecdh_wrapper = "0.0.1"
+byteorder = "1.2.2"
+subtle = "0.6.0"
+sphinxcrypto = "0.0.5"
 
 [dev-dependencies]
-ecdh_wrapper = { path = "../ecdh_wrapper" } # XXX
 rustc-serialize = "0.3.24"
 rand = "^0.4.2"

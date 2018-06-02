@@ -30,7 +30,6 @@ extern crate sphinxcrypto;
 pub mod errors;
 pub mod constants;
 pub mod commands;
-pub mod messages;
 pub mod sessions;
 
 
