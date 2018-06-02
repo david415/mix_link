@@ -30,7 +30,6 @@ use byteorder::{ByteOrder, BigEndian};
 use snow::NoiseBuilder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
-use super::commands::Command;
 use super::errors::{ClientHandshakeError, ServerHandshakeError, ReceiveMessageError, SendMessageError};
 use super::constants::{NOISE_MESSAGE_MAX_SIZE,
                        NOISE_MESSAGE_HEADER_SIZE,
@@ -397,13 +396,14 @@ impl ServerSession {
 mod tests {
     extern crate rand;
     extern crate ecdh_wrapper;
-    extern crate rustc_serialize;
+    //extern crate rustc_serialize;
 
-    use self::rustc_serialize::hex::ToHex;
+    //use self::rustc_serialize::hex::ToHex;
     use self::rand::os::OsRng;
     use ecdh_wrapper::PrivateKey;
     use super::super::sphinxcrypto::constants::USER_FORWARD_PAYLOAD_SIZE;
     use super::{PeerAuthenticator, PeerCredentials};
+    use super::super::commands::Command;
     use super::*;
 
     struct NaiveAuthenticator {}
@@ -442,7 +442,7 @@ mod tests {
         // handshake
         // c -> s
         let client_handshake1 = client_session.initialize().unwrap();
-        client_session.sent_handshake1();
+        let _ok = client_session.sent_handshake1().unwrap();
         let server_handshake1 = server_session.received_handshake1(client_handshake1).unwrap();
 
         // s -> c
