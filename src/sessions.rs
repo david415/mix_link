@@ -100,26 +100,15 @@ impl<'a> DataTransferSession<'a> {
         BigEndian::write_u32(&mut ct_hdr, ct_len as u32);
         let mut ciphertext_header = [0u8; NOISE_MESSAGE_MAX_SIZE];
         let _result = self.session.write_message(&ct_hdr, &mut ciphertext_header);
-        let _header_len;
-        match _result {
-            Ok(x) => {
-                _header_len = x;
-            },
-            Err(_) => {
-                return Err(SendMessageError::EncryptFail)
-            },
-        }
+        let _header_len = match _result {
+            Ok(x) => x,
+            Err(_) => return Err(SendMessageError::EncryptFail),
+        };
         let mut ciphertext = [0u8; NOISE_MESSAGE_MAX_SIZE];
-        let _result = self.session.write_message(&message, &mut ciphertext);
-        let mut _payload_len;
-        match _result {
-            Ok(x) => {
-                _payload_len = x;
-            },
-            Err(_) => {
-                return Err(SendMessageError::EncryptFail)
-            },
-        }
+        let _payload_len = match self.session.write_message(&message, &mut ciphertext) {
+            Ok(x) => x,
+            Err(_) => return Err(SendMessageError::EncryptFail),
+        };
         let mut output = Vec::new();
         output.extend_from_slice(&ciphertext_header[.._header_len]);
         output.extend_from_slice(&ciphertext[.._payload_len]);
@@ -203,14 +192,19 @@ impl ClientSession {
         });
     }
 
-    pub fn data_transfer_session(&mut self) -> DataTransferSession {
-        return DataTransferSession{
-            session: &mut self.session,
+    pub fn data_transfer_session(&mut self) -> Result<DataTransferSession, ClientHandshakeError> {
+        if self.state != ClientState::DataTransfer {
+            return Err(ClientHandshakeError::InvalidStateError);
         }
+        return Ok(DataTransferSession{
+            session: &mut self.session,
+        });
     }
 
     pub fn initialize(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE1_SIZE], ClientHandshakeError> {
-	// -> (prologue), e, f
+        if self.state != ClientState::Init {
+            return Err(ClientHandshakeError::InvalidStateError);
+        }
         let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
         let _len = match self.session.write_message(&[0u8;0], &mut msg) {
             Ok(x) => x,
@@ -253,7 +247,6 @@ impl ClientSession {
     }
 
     pub fn received_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE2_SIZE]) -> Result<(), ClientHandshakeError> {
-        //let mut _raw_auth = [0u8; NOISE_MESSAGE_MAX_SIZE];
         let mut _raw_auth = [0u8; AUTH_MESSAGE_SIZE];
         let _len = match self.session.read_message(&message, &mut _raw_auth) {
             Ok(x) => x,
@@ -323,10 +316,13 @@ impl ServerSession {
         });
     }
 
-    pub fn data_transfer_session(&mut self) -> DataTransferSession {
-        return DataTransferSession{
-            session: &mut self.session,
+    pub fn data_transfer_session(&mut self) -> Result<DataTransferSession, ServerHandshakeError> {
+        if self.state != ServerState::DataTransfer {
+            return Err(ServerHandshakeError::InvalidStateError);
         }
+        return Ok(DataTransferSession{
+            session: &mut self.session,
+        });
     }
 
     pub fn received_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE1_SIZE]) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE2_SIZE], ServerHandshakeError> {
@@ -368,8 +364,7 @@ impl ServerSession {
             return Err(ServerHandshakeError::InvalidStateError);
         }
         let mut raw_auth = [0u8; AUTH_MESSAGE_SIZE];
-        let _match = self.session.read_message(&message, &mut raw_auth);
-        match _match {
+        match self.session.read_message(&message, &mut raw_auth) {
             Ok(x) => x,
             Err(_) => return Err(ServerHandshakeError::Noise3ReadError),
         };
@@ -457,8 +452,8 @@ mod tests {
         // data transfer phase
         server_session.session = server_session.session.into_transport_mode().unwrap();
         client_session.session = client_session.session.into_transport_mode().unwrap();
-        let mut client_data_transfer = client_session.data_transfer_session();
-        let mut server_data_transfer = server_session.data_transfer_session();
+        let mut client_data_transfer = client_session.data_transfer_session().unwrap();
+        let mut server_data_transfer = server_session.data_transfer_session().unwrap();
 
         // s -> c
         let server_cmd = Command::MessageMessage {
@@ -473,6 +468,7 @@ mod tests {
         let raw_cmd = client_data_transfer.decrypt_message(to_send[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
         assert_eq!(server_message, raw_cmd);
 
+        // c -> s
         let client_cmd = Command::NoOp{};
         let client_message = client_cmd.clone().to_vec();
         let client_to_send = client_data_transfer.encrypt_message(client_message.clone()).unwrap();
