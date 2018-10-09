@@ -1,9 +1,10 @@
 [package]
-name = "modem"
-version = "0.1.0"
+name = "mix_link"
+version = "0.0.1"
 authors = ["David Stainton <dstainton415@gmail.com>"]
 description = "message oriented noise based cryptographic link layer for mixnets"
-keywords = ["cryptography", "noise", "network", "mixnet"]
+keywords = ["cryptography", "noise", "network", "mixnet", "link", "link-layer"]
+license = "AGPL-3.0-only"
 
 [dependencies]
 snow = "0.1.12"
