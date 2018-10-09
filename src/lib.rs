@@ -23,7 +23,7 @@ extern crate sphinxcrypto;
 pub mod errors;
 pub mod constants;
 pub mod commands;
-pub mod sessions;
+pub mod messages;
 
 
 #[cfg(test)]
