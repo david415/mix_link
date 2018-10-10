@@ -24,6 +24,7 @@ pub mod errors;
 pub mod constants;
 pub mod commands;
 pub mod messages;
+pub mod sync;
 
 
 #[cfg(test)]
@@ -32,10 +33,11 @@ mod tests {
     //extern crate rustc_serialize;
     extern crate ecdh_wrapper;
     extern crate rand;
+    extern crate snow;
 
     use self::rand::os::OsRng;
 
-    use snow::NoiseBuilder;
+    use snow::Builder;
     use snow::params::NoiseParams;
 
     //use self::rustc_serialize::hex::ToHex;
@@ -50,7 +52,7 @@ mod tests {
 
         // server
         let server_keypair = PrivateKey::generate(&mut r).unwrap();
-        let server_builder: NoiseBuilder = NoiseBuilder::new(noise_params.clone());
+        let server_builder: Builder = Builder::new(noise_params.clone());
         let mut server_session = server_builder
             .local_private_key(&server_keypair.to_vec())
             .prologue(&prologue)
@@ -60,7 +62,7 @@ mod tests {
 
         // client
         let client_keypair = PrivateKey::generate(&mut r).unwrap();
-        let client_builder: NoiseBuilder = NoiseBuilder::new(noise_params.clone());
+        let client_builder: Builder = Builder::new(noise_params.clone());
         let mut client_session = client_builder
             .local_private_key(&client_keypair.to_vec())
             .remote_public_key(&server_keypair.public_key().to_vec())

@@ -14,8 +14,14 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::error::Error;
+extern crate snow;
+
+use std::error::{Error};
 use std::fmt;
+use std::io::{self};
+
+use snow::SnowError;
+
 
 #[derive(Debug)]
 pub enum CommandError {
@@ -59,7 +65,7 @@ impl fmt::Display for CommandError {
 
 impl Error for CommandError {
     fn description(&self) -> &str {
-        "I'm a modem error."
+        "I'm a command error."
     }
 
     fn cause(&self) -> Option<&Error> {
@@ -97,12 +103,13 @@ pub enum ClientHandshakeError {
     FailedToGetRemoteStatic,
     FailedToDecodeRemoteStatic,
     InvalidStateError,
+    SnowError(SnowError),
 }
 
 impl fmt::Display for ClientHandshakeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::ClientHandshakeError::*;
-        match *self {
+        match self {
             InvalidNoiseSpecError => write!(f, "Invalid noise protocol string."),
             NoPeerKeyError => write!(f, "No peer key was supplied."),
             SessionCreateError => write!(f, "Session creation failure."),
@@ -115,13 +122,14 @@ impl fmt::Display for ClientHandshakeError {
             FailedToGetRemoteStatic => write!(f, "Failed to get remote static key."),
             FailedToDecodeRemoteStatic => write!(f, "Failed to decode remote static key."),
             InvalidStateError => write!(f, "Invalid state transition."),
+            SnowError(x) => x.fmt(f),
         }
     }
 }
 
 impl Error for ClientHandshakeError {
     fn description(&self) -> &str {
-        "I'm a modem error."
+        "I'm a client handshake error."
     }
 
     fn cause(&self) -> Option<&Error> {
@@ -139,9 +147,17 @@ impl Error for ClientHandshakeError {
             FailedToGetRemoteStatic => None,
             FailedToDecodeRemoteStatic => None,
             InvalidStateError => None,
+            SnowError(_) => None,
         }
     }
 }
+
+impl From<SnowError> for ClientHandshakeError {
+    fn from(error: snow::SnowError) -> Self {
+        ClientHandshakeError::SnowError(error)
+    }
+}
+
 
 #[derive(Debug)]
 pub enum ServerHandshakeError {
@@ -158,12 +174,13 @@ pub enum ServerHandshakeError {
     FailedToGetRemoteStatic,
     FailedToDecodeRemoteStatic,
     InvalidStateError,
+    SnowError(SnowError),
 }
 
 impl fmt::Display for ServerHandshakeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::ServerHandshakeError::*;
-        match *self {
+        match self {
             PrologueMismatchError => write!(f, "Prologue mismatch error."),
             InvalidNoiseSpecError => write!(f, "Invalid noise protocol string."),
             NoPeerKeyError => write!(f, "No peer key was supplied."),
@@ -177,13 +194,14 @@ impl fmt::Display for ServerHandshakeError {
             FailedToGetRemoteStatic => write!(f, "Failed to get remote static key."),
             FailedToDecodeRemoteStatic => write!(f, "Failed to decode remote static key."),
             InvalidStateError => write!(f, "Invalid state transition."),
+            SnowError(x) => x.fmt(f),
         }
     }
 }
 
 impl Error for ServerHandshakeError {
     fn description(&self) -> &str {
-        "I'm a modem error."
+        "I'm a server handshake error."
     }
 
     fn cause(&self) -> Option<&Error> {
@@ -202,14 +220,114 @@ impl Error for ServerHandshakeError {
             FailedToGetRemoteStatic => None,
             FailedToDecodeRemoteStatic => None,
             InvalidStateError => None,
+            SnowError(_) => None,
         }
     }
 }
+
+
+impl From<SnowError> for ServerHandshakeError {
+    fn from(error: SnowError) -> Self {
+        ServerHandshakeError::SnowError(error)
+    }
+}
+
+#[derive(Debug)]
+pub enum HandshakeError {
+    InvalidNoiseSpecError,
+    NoPeerKeyError,
+    SessionCreateError,
+    ClientHandshakeError(ClientHandshakeError),
+    ServerHandshakeError(ServerHandshakeError),
+    InvalidStateError,
+    InvalidHandshakeFinalize,
+    IOError(io::Error),
+    SnowError(snow::SnowError),
+    ReceiveMessageError(ReceiveMessageError),
+    SendMessageError(SendMessageError),
+}
+
+impl fmt::Display for HandshakeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::HandshakeError::*;
+        match self {
+            InvalidNoiseSpecError => write!(f, "Invalid noise protocol string."),
+            NoPeerKeyError => write!(f, "No peer key was supplied."),
+            SessionCreateError => write!(f, "Session creation failure."),
+            ClientHandshakeError(x) => x.fmt(f),
+            ServerHandshakeError(x) => x.fmt(f),
+            InvalidHandshakeFinalize => write!(f, "Invalid command received from handshake finalization."),
+            InvalidStateError => write!(f, "Impossible error like this should never happen."),
+            _ => write!(f, "Impossible error like this should never happen."),
+        }
+    }
+}
+
+impl Error for HandshakeError {
+    fn description(&self) -> &str {
+        "I'm a handshake error."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::HandshakeError::*;
+        match self {
+            InvalidNoiseSpecError => None,
+            NoPeerKeyError => None,
+            SessionCreateError => None,
+            ClientHandshakeError(x) => x.cause(),
+            ServerHandshakeError(x) => x.cause(),
+            InvalidStateError => None,
+            IOError(x) => x.cause(),
+            SnowError(_) => None,
+            ReceiveMessageError(x) => x.cause(),
+            SendMessageError(x) => x.cause(),
+            InvalidHandshakeFinalize => None,
+        }
+    }
+}
+
+impl From<SendMessageError> for HandshakeError {
+    fn from(error: SendMessageError) -> Self {
+        HandshakeError::SendMessageError(error)
+    }
+}
+
+impl From<ReceiveMessageError> for HandshakeError {
+    fn from(error: ReceiveMessageError) -> Self {
+        HandshakeError::ReceiveMessageError(error)
+    }
+}
+
+impl From<ClientHandshakeError> for HandshakeError {
+    fn from(error: ClientHandshakeError) -> Self {
+        HandshakeError::ClientHandshakeError(error)
+    }
+}
+
+impl From<ServerHandshakeError> for HandshakeError {
+    fn from(error: ServerHandshakeError) -> Self {
+        HandshakeError::ServerHandshakeError(error)
+    }
+}
+
+impl From<io::Error> for HandshakeError {
+    fn from(error: io::Error) -> Self {
+        HandshakeError::IOError(error)
+    }
+}
+
+impl From<snow::SnowError> for HandshakeError {
+    fn from(error: snow::SnowError) -> Self {
+        HandshakeError::SnowError(error)
+    }
+}
+
 
 #[derive(Debug)]
 pub enum SendMessageError {
     InvalidMessageSize,
     EncryptFail,
+    IOError(io::Error),
 }
 
 impl fmt::Display for SendMessageError {
@@ -218,13 +336,14 @@ impl fmt::Display for SendMessageError {
         match *self {
             InvalidMessageSize => write!(f, "Invalid message size."),
             EncryptFail => write!(f, "Failure to encrypt."),
+            IOError(ref x) => x.fmt(f),
         }
     }
 }
 
 impl Error for SendMessageError {
     fn description(&self) -> &str {
-        "I'm a modem error."
+        "I'm a send message error."
     }
 
     fn cause(&self) -> Option<&Error> {
@@ -232,7 +351,14 @@ impl Error for SendMessageError {
         match *self {
             InvalidMessageSize => None,
             EncryptFail => None,
+            IOError(_) => None,
         }
+    }
+}
+
+impl From<io::Error> for SendMessageError {
+    fn from(error: io::Error) -> Self {
+        SendMessageError::IOError(error)
     }
 }
 
@@ -240,21 +366,25 @@ impl Error for SendMessageError {
 pub enum ReceiveMessageError {
     InvalidMessageSize,
     DecryptFail,
+    CommandError(CommandError),
+    IOError(io::Error),
 }
 
 impl fmt::Display for ReceiveMessageError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::ReceiveMessageError::*;
-        match *self {
+        match self {
             InvalidMessageSize => write!(f, "Invalid message size."),
             DecryptFail => write!(f, "Failure to encrypt."),
+            CommandError(x) => x.fmt(f),
+            IOError(ref x) => x.fmt(f),
         }
     }
 }
 
 impl Error for ReceiveMessageError {
     fn description(&self) -> &str {
-        "I'm a modem error."
+        "I'm a receive message error."
     }
 
     fn cause(&self) -> Option<&Error> {
@@ -262,6 +392,20 @@ impl Error for ReceiveMessageError {
         match *self {
             InvalidMessageSize => None,
             DecryptFail => None,
+            CommandError(_) => None,
+            IOError(_) => None,
         }
+    }
+}
+
+impl From<CommandError> for ReceiveMessageError {
+    fn from(error: CommandError) -> Self {
+        ReceiveMessageError::CommandError(error)
+    }
+}
+
+impl From<io::Error> for ReceiveMessageError {
+    fn from(error: io::Error) -> Self {
+        ReceiveMessageError::IOError(error)
     }
 }

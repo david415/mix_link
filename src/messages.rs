@@ -18,12 +18,15 @@ extern crate snow;
 extern crate ecdh_wrapper;
 
 use std::time::SystemTime;
+
 use subtle::ConstantTimeEq;
 use byteorder::{ByteOrder, BigEndian};
-use snow::NoiseBuilder;
+use snow::Builder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
+use super::errors::{HandshakeError};
 use super::errors::{ClientHandshakeError, ServerHandshakeError, ReceiveMessageError, SendMessageError};
+
 use super::constants::{NOISE_MESSAGE_MAX_SIZE,
                        NOISE_MESSAGE_HEADER_SIZE,
                        NOISE_HANDSHAKE_MESSAGE1_SIZE,
@@ -79,11 +82,217 @@ pub trait PeerAuthenticator {
     fn is_peer_valid(&self, peer_credentials: &PeerCredentials) -> bool;
 }
 
-pub struct DataTransferSession<'a> {
-    session: &'a mut snow::Session,
+#[derive(PartialEq, Debug, Clone)]
+pub enum State {
+    Init,
+    SentClientHandshake1,
+    ReceivedServerHandshake1,
+    ReceivedClientHandshake1,
+    SentServerHandshake1,
+    DataTransfer,
+    Disconnected,
+    Invalid,
 }
 
-impl<'a> DataTransferSession<'a> {
+pub struct SessionConfig {
+    pub authenticator: Box<PeerAuthenticator+Send>,
+    pub authentication_key: PrivateKey,
+    pub peer_public_key: Option<PublicKey>,
+    pub additional_data: Vec<u8>,
+}
+
+pub struct MessageFactory {
+    session: snow::Session,
+    state: State,
+    additional_data: Vec<u8>,
+    authenticator: Box<PeerAuthenticator+Send>,
+}
+
+impl MessageFactory {
+    pub fn new(config: SessionConfig, is_initiator: bool) -> Result<MessageFactory, HandshakeError> {
+        let noise_params;
+        match NOISE_PARAMS.parse() {
+            Ok(x) => {
+                noise_params = x;
+            },
+            Err(_) => return Err(HandshakeError::InvalidNoiseSpecError),
+        }
+        let noise_builder: Builder = Builder::new(noise_params);
+        if is_initiator {
+            if !config.peer_public_key.is_some() {
+                return Err(HandshakeError::NoPeerKeyError);
+            }
+            let session = match noise_builder
+                .local_private_key(&config.authentication_key.to_vec())
+                .remote_public_key(&(config.peer_public_key.unwrap()).to_vec())
+                .prologue(&PROLOGUE)
+                .build_initiator() {
+                    Ok(x) => x,
+                    Err(_) => return Err(HandshakeError::SessionCreateError),
+                };
+            return Ok(MessageFactory {
+                state: State::Init,
+                additional_data: config.additional_data,
+                authenticator: config.authenticator,
+                session: session,
+            });
+        }
+        let session = match noise_builder
+            .local_private_key(&config.authentication_key.to_vec())
+            .prologue(&PROLOGUE)
+            .build_responder() {
+                Ok(x) => x,
+                Err(_) => return Err(HandshakeError::SessionCreateError),
+            };
+        return Ok(MessageFactory {
+            additional_data: config.additional_data,
+            authenticator: config.authenticator,
+            session: session,
+            state: State::Init,
+        });
+    }
+
+    pub fn client_handshake1(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE1_SIZE], ClientHandshakeError> {
+	// -> (prologue), e, f
+        let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
+        let _len = match self.session.write_message(&[0u8;0], &mut msg) {
+            Ok(x) => x,
+            Err(_) => return Err(ClientHandshakeError::Noise1WriteError),
+        };
+        let mut msg1 = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
+        msg1[0] = PROLOGUE[0];
+        msg1[PROLOGUE_SIZE..].copy_from_slice(&msg[.._len]);
+        return Ok(msg1);
+    }
+
+    pub fn sent_client_handshake1(&mut self) {
+        self.state = State::SentClientHandshake1;
+    }
+
+    pub fn sent_client_handshake2(&mut self) {
+        self.state = State::DataTransfer;
+    }
+
+    pub fn client_handshake2(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE3_SIZE], ClientHandshakeError> {
+        let now = SystemTime::now();
+        let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
+        let our_auth = AuthenticateMessage {
+            additional_data: self.additional_data.clone(),
+            unix_time: now.elapsed().unwrap().as_secs() as u32,
+        };
+        let raw_auth = our_auth.to_vec().unwrap();
+        let _len = match self.session.write_message(&raw_auth, &mut msg) {
+            Ok(x) => x,
+            Err(_) => return Err(ClientHandshakeError::Noise3WriteError),
+        };
+        assert_eq!(NOISE_HANDSHAKE_MESSAGE3_SIZE, _len);
+        let mut _msg3 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
+        _msg3.copy_from_slice(&msg[..NOISE_HANDSHAKE_MESSAGE3_SIZE]);
+        return Ok(_msg3);
+    }
+
+    pub fn received_server_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE2_SIZE]) -> Result<(), ClientHandshakeError> {
+        let mut _raw_auth = [0u8; AUTH_MESSAGE_SIZE];
+        let _len = match self.session.read_message(&message, &mut _raw_auth) {
+            Ok(x) => x,
+            Err(_) => return Err(ClientHandshakeError::Noise2ReadError),
+        };
+        let auth_msg = match authenticate_message_from_bytes(&_raw_auth) {
+            Ok(x) => x,
+            Err(_) => return Err(ClientHandshakeError::AuthenticationError),
+        };
+        let raw_peer_key = match self.session.get_remote_static() {
+            Some(x) => x,
+            None => return Err(ClientHandshakeError::FailedToGetRemoteStatic),
+        };
+        let mut peer_key = PublicKey::default();
+        match peer_key.from_bytes(raw_peer_key) {
+            Ok(_x) => {},
+            Err(_y) => return Err(ClientHandshakeError::FailedToDecodeRemoteStatic),
+        }
+        let peer_credentials = PeerCredentials {
+            additional_data: auth_msg.additional_data,
+            public_key: peer_key,
+        };
+        if !self.authenticator.is_peer_valid(&peer_credentials) {
+            return Err(ClientHandshakeError::AuthenticationError);
+        }
+        self.state = State::ReceivedServerHandshake1;
+        return Ok(());
+    }
+
+    pub fn received_client_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE1_SIZE]) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE2_SIZE], ServerHandshakeError> {
+        if self.state != State::Init {
+            return Err(ServerHandshakeError::InvalidStateError);
+        }
+        if message[0..PROLOGUE_SIZE].ct_eq(&PROLOGUE).unwrap_u8() == 0 {
+            return Err(ServerHandshakeError::PrologueMismatchError);
+        }
+        let mut _msg = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
+        let _len = match self.session.read_message(&message[PROLOGUE_SIZE..], &mut _msg) {
+            Ok(x) => x,
+            Err(_) => return Err(ServerHandshakeError::Noise1ReadError),
+        };
+        self.state = State::ReceivedClientHandshake1;
+
+        // send server's handshake1 message
+        let now = SystemTime::now();
+        let our_auth = AuthenticateMessage {
+            additional_data: self.additional_data.clone(),
+            unix_time: now.elapsed().unwrap().as_secs() as u32,
+        };
+        let raw_auth = our_auth.to_vec().unwrap();
+        let mut mesg = [0u8; NOISE_HANDSHAKE_MESSAGE2_SIZE];
+        let mut _len = match self.session.write_message(&raw_auth, &mut mesg) {
+            Ok(x) => x,
+            Err(_) => return Err(ServerHandshakeError::Noise2WriteError),
+        };
+        assert_eq!(NOISE_HANDSHAKE_MESSAGE2_SIZE, _len);
+        return Ok(mesg);
+    }
+
+    pub fn sent_server_handshake1(&mut self) {
+        self.state = State::SentServerHandshake1;
+    }
+
+    pub fn received_client_handshake2(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE3_SIZE]) -> Result<(), ServerHandshakeError> {
+        if self.state != State::SentServerHandshake1 {
+            return Err(ServerHandshakeError::InvalidStateError);
+        }
+        let mut raw_auth = [0u8; AUTH_MESSAGE_SIZE];
+        let _match = self.session.read_message(&message, &mut raw_auth);
+        match _match {
+            Ok(x) => x,
+            Err(_) => return Err(ServerHandshakeError::Noise3ReadError),
+        };
+        let peer_auth = authenticate_message_from_bytes(&raw_auth).unwrap();
+        let raw_peer_key = self.session.get_remote_static().unwrap();
+        let mut peer_key = PublicKey::default();
+        match peer_key.from_bytes(raw_peer_key) {
+            Ok(_) => {},
+            Err(_) => return Err(ServerHandshakeError::FailedToDecodeRemoteStatic),
+        }
+        let peer_credentials = PeerCredentials {
+            additional_data: peer_auth.additional_data,
+            public_key: peer_key,
+        };
+        if !self.authenticator.is_peer_valid(&peer_credentials) {
+            return Err(ServerHandshakeError::AuthenticationError);
+        }
+        self.state = State::DataTransfer;
+        return Ok(());
+    }
+
+    pub fn into_transport_mode(self) -> Result<Self, HandshakeError> {
+        // Transition into transport mode after handshake is finished.
+        Ok(Self {
+            session: self.session.into_transport_mode()?,
+            state: self.state,
+            additional_data: self.additional_data,
+            authenticator: self.authenticator,
+        })
+    }
+
     pub fn encrypt_message(&mut self, message: Vec<u8>) -> Result<Vec<u8>, SendMessageError> {
         let ct_len = MAC_SIZE + message.len();
         if ct_len > NOISE_MESSAGE_MAX_SIZE {
@@ -143,248 +352,6 @@ impl<'a> DataTransferSession<'a> {
     }
 }
 
-pub struct SessionConfig {
-    pub authenticator: Box<PeerAuthenticator>,
-    pub authentication_key: PrivateKey,
-    pub peer_public_key: Option<PublicKey>,
-    pub additional_data: Vec<u8>,
-}
-
-#[derive(PartialEq, Debug)]
-pub enum ClientState {
-    Init,
-    SentHandshake1,
-    ReceivedHandshake1,
-    DataTransfer,
-    Disconnected,
-    Invalid,
-}
-
-pub struct ClientSession {
-    state: ClientState,
-    session: snow::Session,
-    additional_data: Vec<u8>,
-    authenticator: Box<PeerAuthenticator>,
-}
-
-impl ClientSession {
-    pub fn new(config: SessionConfig) -> Result<ClientSession, ClientHandshakeError> {
-        let noise_params;
-        match NOISE_PARAMS.parse() {
-            Ok(x) => {
-                noise_params = x;
-            },
-            Err(_) => return Err(ClientHandshakeError::InvalidNoiseSpecError),
-        }
-        let noise_builder: NoiseBuilder = NoiseBuilder::new(noise_params);
-        if !config.peer_public_key.is_some() {
-            return Err(ClientHandshakeError::NoPeerKeyError);
-        }
-        let session = match noise_builder
-            .local_private_key(&config.authentication_key.to_vec())
-            .remote_public_key(&(config.peer_public_key.unwrap()).to_vec())
-            .prologue(&PROLOGUE)
-            .build_initiator() {
-                Ok(x) => x,
-                Err(_) => return Err(ClientHandshakeError::SessionCreateError),
-            };
-        return Ok(ClientSession {
-            state: ClientState::Init,
-            additional_data: config.additional_data,
-            authenticator: config.authenticator,
-            session: session,
-        });
-    }
-
-    pub fn data_transfer_session(&mut self) -> DataTransferSession {
-        return DataTransferSession{
-            session: &mut self.session,
-        }
-    }
-
-    pub fn initialize(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE1_SIZE], ClientHandshakeError> {
-	// -> (prologue), e, f
-        let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
-        let _len = match self.session.write_message(&[0u8;0], &mut msg) {
-            Ok(x) => x,
-            Err(_) => return Err(ClientHandshakeError::Noise1WriteError),
-        };
-        let mut msg1 = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
-        msg1[0] = PROLOGUE[0];
-        msg1[PROLOGUE_SIZE..].copy_from_slice(&msg[.._len]);
-        return Ok(msg1);
-    }
-
-    pub fn sent_handshake1(&mut self) -> Result<(), ClientHandshakeError> {
-        if self.state != ClientState::Init {
-            return Err(ClientHandshakeError::SentHandshake1InvalidState);
-        }
-        self.state = ClientState::SentHandshake1;
-        return Ok(());
-    }
-
-    pub fn sent_handshake2(&mut self) {
-        self.state = ClientState::DataTransfer;
-    }
-
-    pub fn handshake2(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE3_SIZE], ClientHandshakeError> {
-        let now = SystemTime::now();
-        let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
-        let our_auth = AuthenticateMessage {
-            additional_data: self.additional_data.clone(),
-            unix_time: now.elapsed().unwrap().as_secs() as u32,
-        };
-        let raw_auth = our_auth.to_vec().unwrap();
-        let _len = match self.session.write_message(&raw_auth, &mut msg) {
-            Ok(x) => x,
-            Err(_) => return Err(ClientHandshakeError::Noise3WriteError),
-        };
-        assert_eq!(NOISE_HANDSHAKE_MESSAGE3_SIZE, _len);
-        let mut _msg3 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
-        _msg3.copy_from_slice(&msg[..NOISE_HANDSHAKE_MESSAGE3_SIZE]);
-        return Ok(_msg3);
-    }
-
-    pub fn received_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE2_SIZE]) -> Result<(), ClientHandshakeError> {
-        //let mut _raw_auth = [0u8; NOISE_MESSAGE_MAX_SIZE];
-        let mut _raw_auth = [0u8; AUTH_MESSAGE_SIZE];
-        let _len = match self.session.read_message(&message, &mut _raw_auth) {
-            Ok(x) => x,
-            Err(_) => return Err(ClientHandshakeError::Noise2ReadError),
-        };
-        let auth_msg = match authenticate_message_from_bytes(&_raw_auth) {
-            Ok(x) => x,
-            Err(_) => return Err(ClientHandshakeError::AuthenticationError),
-        };
-        let raw_peer_key = match self.session.get_remote_static() {
-            Some(x) => x,
-            None => return Err(ClientHandshakeError::FailedToGetRemoteStatic),
-        };
-        let mut peer_key = PublicKey::default();
-        match peer_key.from_bytes(raw_peer_key) {
-            Ok(_x) => {},
-            Err(_y) => return Err(ClientHandshakeError::FailedToDecodeRemoteStatic),
-        }
-        let peer_credentials = PeerCredentials {
-            additional_data: auth_msg.additional_data,
-            public_key: peer_key,
-        };
-        if !self.authenticator.is_peer_valid(&peer_credentials) {
-            return Err(ClientHandshakeError::AuthenticationError);
-        }
-        self.state = ClientState::ReceivedHandshake1;
-        return Ok(());
-    }
-}
-
-#[derive(PartialEq, Debug)]
-pub enum ServerState {
-    Init,
-    ReceivedHandshake1,
-    SentHandshake1,
-    DataTransfer,
-    Disconnected,
-    Invalid,
-}
-
-pub struct ServerSession {
-    state: ServerState,
-    session: snow::Session,
-    additional_data: Vec<u8>,
-    authenticator: Box<PeerAuthenticator>,
-}
-
-impl ServerSession {
-    pub fn new(config: SessionConfig) -> Result<ServerSession, ServerHandshakeError> {
-        let noise_params = match NOISE_PARAMS.parse() {
-            Ok(x) => x,
-            Err(_) => return Err(ServerHandshakeError::InvalidNoiseSpecError),
-        };
-        let noise_builder: NoiseBuilder = NoiseBuilder::new(noise_params);
-        let session = match noise_builder
-            .local_private_key(&config.authentication_key.to_vec())
-            .prologue(&PROLOGUE)
-            .build_responder() {
-                Ok(x) => x,
-                Err(_) => return Err(ServerHandshakeError::SessionCreateError),
-            };
-        return Ok(ServerSession {
-            additional_data: config.additional_data,
-            authenticator: config.authenticator,
-            session: session,
-            state: ServerState::Init,
-        });
-    }
-
-    pub fn data_transfer_session(&mut self) -> DataTransferSession {
-        return DataTransferSession{
-            session: &mut self.session,
-        }
-    }
-
-    pub fn received_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE1_SIZE]) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE2_SIZE], ServerHandshakeError> {
-        if self.state != ServerState::Init {
-            return Err(ServerHandshakeError::InvalidStateError);
-        }
-        if message[0..PROLOGUE_SIZE].ct_eq(&PROLOGUE).unwrap_u8() == 0 {
-            return Err(ServerHandshakeError::PrologueMismatchError);
-        }
-        let mut _msg = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
-        let _len = match self.session.read_message(&message[PROLOGUE_SIZE..], &mut _msg) {
-            Ok(x) => x,
-            Err(_) => return Err(ServerHandshakeError::Noise1ReadError),
-        };
-        self.state = ServerState::ReceivedHandshake1;
-
-        // send server's handshake1 message
-        let now = SystemTime::now();
-        let our_auth = AuthenticateMessage {
-            additional_data: self.additional_data.clone(),
-            unix_time: now.elapsed().unwrap().as_secs() as u32,
-        };
-        let raw_auth = our_auth.to_vec().unwrap();
-        let mut mesg = [0u8; NOISE_HANDSHAKE_MESSAGE2_SIZE];
-        let mut _len = match self.session.write_message(&raw_auth, &mut mesg) {
-            Ok(x) => x,
-            Err(_) => return Err(ServerHandshakeError::Noise2WriteError),
-        };
-        assert_eq!(NOISE_HANDSHAKE_MESSAGE2_SIZE, _len);
-        return Ok(mesg);
-    }
-
-    pub fn sent_handshake1(&mut self) {
-        self.state = ServerState::SentHandshake1;
-    }
-
-    pub fn received_handshake2(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE3_SIZE]) -> Result<(), ServerHandshakeError> {
-        if self.state != ServerState::SentHandshake1 {
-            return Err(ServerHandshakeError::InvalidStateError);
-        }
-        let mut raw_auth = [0u8; AUTH_MESSAGE_SIZE];
-        let _match = self.session.read_message(&message, &mut raw_auth);
-        match _match {
-            Ok(x) => x,
-            Err(_) => return Err(ServerHandshakeError::Noise3ReadError),
-        };
-        let peer_auth = authenticate_message_from_bytes(&raw_auth).unwrap();
-        let raw_peer_key = self.session.get_remote_static().unwrap();
-        let mut peer_key = PublicKey::default();
-        match peer_key.from_bytes(raw_peer_key) {
-            Ok(_) => {},
-            Err(_) => return Err(ServerHandshakeError::FailedToDecodeRemoteStatic),
-        }
-        let peer_credentials = PeerCredentials {
-            additional_data: peer_auth.additional_data,
-            public_key: peer_key,
-        };
-        if !self.authenticator.is_peer_valid(&peer_credentials) {
-            return Err(ServerHandshakeError::AuthenticationError);
-        }
-        self.state = ServerState::DataTransfer;
-        return Ok(());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     extern crate rand;
@@ -407,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn session_handshake_test() {
+    fn message_handshake_test() {
         let mut r = OsRng::new().expect("failure to create an OS RNG");
 
         // server
@@ -419,7 +386,7 @@ mod tests {
             peer_public_key: None,
             additional_data: vec![],
         };
-        let mut server_session = ServerSession::new(server_config).unwrap();
+        let mut server_session = MessageFactory::new(server_config, false).unwrap();
 
         // client
         let client_authenticator = NaiveAuthenticator{};
@@ -430,28 +397,26 @@ mod tests {
             peer_public_key: Some(server_keypair.public_key()),
             additional_data: vec![],
         };
-        let mut client_session = ClientSession::new(client_config).unwrap();
+        let mut client_session = MessageFactory::new(client_config, true).unwrap();
 
         // handshake
         // c -> s
-        let client_handshake1 = client_session.initialize().unwrap();
-        let _ok = client_session.sent_handshake1().unwrap();
-        let server_handshake1 = server_session.received_handshake1(client_handshake1).unwrap();
+        let client_handshake1 = client_session.client_handshake1().unwrap();
+        let _ok = client_session.sent_client_handshake1();
+        let server_handshake1 = server_session.received_client_handshake1(client_handshake1).unwrap();
 
         // s -> c
-        server_session.sent_handshake1();
-        client_session.received_handshake1(server_handshake1).unwrap();
+        server_session.sent_server_handshake1();
+        client_session.received_server_handshake1(server_handshake1).unwrap();
 
         // c -> s
-        let client_handshake2 = client_session.handshake2().unwrap();
-        client_session.sent_handshake2();
-        server_session.received_handshake2(client_handshake2).unwrap();
+        let client_handshake2 = client_session.client_handshake2().unwrap();
+        client_session.sent_client_handshake2();
+        server_session.received_client_handshake2(client_handshake2).unwrap();
 
         // data transfer phase
-        server_session.session = server_session.session.into_transport_mode().unwrap();
-        client_session.session = client_session.session.into_transport_mode().unwrap();
-        let mut client_data_transfer = client_session.data_transfer_session();
-        let mut server_data_transfer = server_session.data_transfer_session();
+        server_session = server_session.into_transport_mode().unwrap();
+        client_session = client_session.into_transport_mode().unwrap();
 
         // s -> c
         let server_cmd = Command::MessageMessage {
@@ -460,17 +425,17 @@ mod tests {
             payload: vec![0u8; USER_FORWARD_PAYLOAD_SIZE],
         };
         let server_message = server_cmd.clone().to_vec();
-        let to_send = server_data_transfer.encrypt_message(server_message.clone()).unwrap();
+        let to_send = server_session.encrypt_message(server_message.clone()).unwrap();
 
-        let _mesg_len = client_data_transfer.decrypt_message_header(to_send.clone()).unwrap();
-        let raw_cmd = client_data_transfer.decrypt_message(to_send[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
+        let _mesg_len = client_session.decrypt_message_header(to_send.clone()).unwrap();
+        let raw_cmd = client_session.decrypt_message(to_send[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
         assert_eq!(server_message, raw_cmd);
 
         let client_cmd = Command::NoOp{};
         let client_message = client_cmd.clone().to_vec();
-        let client_to_send = client_data_transfer.encrypt_message(client_message.clone()).unwrap();
-        let _mesg_len = server_data_transfer.decrypt_message_header(client_to_send.clone()).unwrap();
-        let raw_cmd = server_data_transfer.decrypt_message(client_to_send[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
+        let client_to_send = client_session.encrypt_message(client_message.clone()).unwrap();
+        let _mesg_len = server_session.decrypt_message_header(client_to_send.clone()).unwrap();
+        let raw_cmd = server_session.decrypt_message(client_to_send[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
         assert_eq!(raw_cmd, client_message);
     }
 }

@@ -7,7 +7,7 @@ keywords = ["cryptography", "noise", "network", "mixnet", "link", "link-layer"]
 license = "AGPL-3.0-only"
 
 [dependencies]
-snow = "0.1.12"
+snow = "0.4.0"
 ecdh_wrapper = "0.0.1"
 byteorder = "1.2.2"
 subtle = "0.6.0"
