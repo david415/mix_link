@@ -127,6 +127,13 @@ impl Session {
         })
     }
 
+    pub fn rekey(&mut self) -> Result<(), SendMessageError> {
+        match self.message_factory.rekey() {
+           Ok(_) => return Ok(()),
+           Err(err) => return Err(SendMessageError::RekeyError),
+        }
+    }
+
     pub fn send_command(&mut self, cmd: Command) -> Result<(), SendMessageError> {
         let ct = cmd.to_vec();
         let ct_len = MAC_LEN + ct.len();
@@ -137,8 +144,7 @@ impl Session {
         let mut to_send = vec![];
         to_send.extend(self.message_factory.encrypt_message(ct)?);
 
-        // Rekey
-        // XXX
+        self.rekey();
 
         self.tcp_stream.as_mut().unwrap().write(&to_send)?;
         return Ok(())
@@ -155,8 +161,7 @@ impl Session {
         self.tcp_stream.as_mut().unwrap().read_exact(&mut ct)?;
         let body = self.message_factory.decrypt_message(ct)?;
 
-        // Rekey
-        // XXX
+        self.rekey();
 
         let cmd = Command::from_bytes(&body)?;
         return Ok(cmd);

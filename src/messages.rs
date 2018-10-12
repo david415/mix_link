@@ -18,6 +18,7 @@ extern crate snow;
 extern crate ecdh_wrapper;
 
 use std::time::SystemTime;
+use std::u64;
 
 use subtle::ConstantTimeEq;
 use byteorder::{ByteOrder, BigEndian};
@@ -106,6 +107,7 @@ pub struct MessageFactory {
     state: State,
     additional_data: Vec<u8>,
     authenticator: Box<PeerAuthenticator+Send>,
+    is_initiator: bool,
 }
 
 impl MessageFactory {
@@ -135,6 +137,7 @@ impl MessageFactory {
                 additional_data: config.additional_data,
                 authenticator: config.authenticator,
                 session: session,
+                is_initiator: is_initiator,
             });
         }
         let session = match noise_builder
@@ -149,7 +152,26 @@ impl MessageFactory {
             authenticator: config.authenticator,
             session: session,
             state: State::Init,
+            is_initiator: is_initiator,
         });
+    }
+
+    pub fn rekey_key(&mut self) -> Result<Vec<u8>, HandshakeError> {
+        let mut output = vec![0u8; 32];
+        let payload = vec![0u8; 0];
+        let nonce = u64::MAX;
+        let count = self.session.write_message_with_nonce(nonce, &payload, &mut output)?;
+        return Ok(output);
+    }
+
+    pub fn rekey(&mut self) -> Result<(), HandshakeError> {
+        let new_key = self.rekey_key()?;
+        if self.is_initiator {
+            self.session.rekey(Some(&new_key), None)?;
+        } else {
+            self.session.rekey(None, Some(&new_key))?;
+        }
+        return Ok(());
     }
 
     pub fn client_handshake1(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE1_SIZE], ClientHandshakeError> {
@@ -290,6 +312,7 @@ impl MessageFactory {
             state: self.state,
             additional_data: self.additional_data,
             authenticator: self.authenticator,
+            is_initiator: self.is_initiator,
         })
     }
 

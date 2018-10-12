@@ -327,6 +327,7 @@ impl From<snow::SnowError> for HandshakeError {
 pub enum SendMessageError {
     InvalidMessageSize,
     EncryptFail,
+    RekeyError,
     IOError(io::Error),
 }
 
@@ -337,6 +338,7 @@ impl fmt::Display for SendMessageError {
             InvalidMessageSize => write!(f, "Invalid message size."),
             EncryptFail => write!(f, "Failure to encrypt."),
             IOError(ref x) => x.fmt(f),
+            RekeyError => write!(f, "Failure to rekey."),
         }
     }
 }
@@ -352,6 +354,7 @@ impl Error for SendMessageError {
             InvalidMessageSize => None,
             EncryptFail => None,
             IOError(_) => None,
+            RekeyError => None,
         }
     }
 }
