@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub const NOISE_PARAMS: &'static str = "Noise_XX_25519_ChaChaPoly_BLAKE2b";
+pub const NOISE_PARAMS: & str = "Noise_XX_25519_ChaChaPoly_BLAKE2b";
 pub const PROLOGUE: [u8;1] = [0u8;1];
 pub const PROLOGUE_SIZE: usize = 1;
 pub const NOISE_MESSAGE_MAX_SIZE: usize = 65535;

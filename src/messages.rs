@@ -25,7 +25,7 @@ use byteorder::{ByteOrder, BigEndian};
 use snow::Builder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
-use super::errors::{HandshakeError};
+use super::errors::{HandshakeError, RekeyError};
 use super::errors::{ClientHandshakeError, ServerHandshakeError, ReceiveMessageError, SendMessageError};
 
 use super::constants::{NOISE_MESSAGE_MAX_SIZE,
@@ -59,7 +59,7 @@ impl AuthenticateMessage {
         let mut _time = [0u8; 4];
         BigEndian::write_u32(&mut _time, self.unix_time);
         out.extend_from_slice(&_time);
-        return Ok(out);
+        Ok(out)
     }
 }
 
@@ -68,10 +68,10 @@ fn authenticate_message_from_bytes(b: &[u8]) -> Result<AuthenticateMessage, &'st
         return Err("authenticate message is not the valid size");
     }
     let ad_len = b[0] as usize;
-    return Ok(AuthenticateMessage {
+    Ok(AuthenticateMessage {
         additional_data: b[1..1+ad_len].to_vec(),
         unix_time: BigEndian::read_u32(&b[1+MAX_ADDITIONAL_DATA_SIZE..]),
-    });
+    })
 }
 
 pub struct PeerCredentials {
@@ -136,8 +136,8 @@ impl MessageFactory {
                 state: State::Init,
                 additional_data: config.additional_data,
                 authenticator: config.authenticator,
-                session: session,
-                is_initiator: is_initiator,
+                session,
+                is_initiator,
             });
         }
         let session = match noise_builder
@@ -147,31 +147,31 @@ impl MessageFactory {
                 Ok(x) => x,
                 Err(_) => return Err(HandshakeError::SessionCreateError),
             };
-        return Ok(MessageFactory {
+        Ok(MessageFactory {
+            state: State::Init,
             additional_data: config.additional_data,
             authenticator: config.authenticator,
-            session: session,
-            state: State::Init,
-            is_initiator: is_initiator,
-        });
+            session,
+            is_initiator,
+        })
     }
 
-    pub fn rekey_key(&mut self) -> Result<Vec<u8>, HandshakeError> {
-        let mut output = vec![0u8; 32];
+    pub fn rekey_key(&mut self) -> Result<Vec<u8>, RekeyError> {
+        let mut new_key = vec![0u8; 32];
         let payload = vec![0u8; 0];
         let nonce = u64::MAX;
-        let count = self.session.write_message_with_nonce(nonce, &payload, &mut output)?;
-        return Ok(output);
+        let _ = self.session.write_message_with_nonce(nonce, &payload, &mut new_key)?;
+        Ok(new_key)
     }
 
-    pub fn rekey(&mut self) -> Result<(), HandshakeError> {
+    pub fn rekey(&mut self) -> Result<(), RekeyError> {
         let new_key = self.rekey_key()?;
         if self.is_initiator {
             self.session.rekey(Some(&new_key), None)?;
         } else {
             self.session.rekey(None, Some(&new_key))?;
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn client_handshake1(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE1_SIZE], ClientHandshakeError> {
@@ -184,7 +184,7 @@ impl MessageFactory {
         let mut msg1 = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
         msg1[0] = PROLOGUE[0];
         msg1[PROLOGUE_SIZE..].copy_from_slice(&msg[.._len]);
-        return Ok(msg1);
+        Ok(msg1)
     }
 
     pub fn sent_client_handshake1(&mut self) {
@@ -210,7 +210,7 @@ impl MessageFactory {
         assert_eq!(NOISE_HANDSHAKE_MESSAGE3_SIZE, _len);
         let mut _msg3 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
         _msg3.copy_from_slice(&msg[..NOISE_HANDSHAKE_MESSAGE3_SIZE]);
-        return Ok(_msg3);
+        Ok(_msg3)
     }
 
     pub fn received_server_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE2_SIZE]) -> Result<(), ClientHandshakeError> {
@@ -240,7 +240,7 @@ impl MessageFactory {
             return Err(ClientHandshakeError::AuthenticationError);
         }
         self.state = State::ReceivedServerHandshake1;
-        return Ok(());
+        Ok(())
     }
 
     pub fn received_client_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE1_SIZE]) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE2_SIZE], ServerHandshakeError> {
@@ -270,7 +270,7 @@ impl MessageFactory {
             Err(_) => return Err(ServerHandshakeError::Noise2WriteError),
         };
         assert_eq!(NOISE_HANDSHAKE_MESSAGE2_SIZE, _len);
-        return Ok(mesg);
+        Ok(mesg)
     }
 
     pub fn sent_server_handshake1(&mut self) {
@@ -302,7 +302,7 @@ impl MessageFactory {
             return Err(ServerHandshakeError::AuthenticationError);
         }
         self.state = State::DataTransfer;
-        return Ok(());
+        Ok(())
     }
 
     pub fn into_transport_mode(self) -> Result<Self, HandshakeError> {
@@ -348,7 +348,7 @@ impl MessageFactory {
         let mut output = Vec::new();
         output.extend_from_slice(&ciphertext_header[.._header_len]);
         output.extend_from_slice(&ciphertext[.._payload_len]);
-        return Ok(output);
+        Ok(output)
     }
 
     pub fn decrypt_message_header(&mut self, message: Vec<u8>) -> Result<u32, ReceiveMessageError> {
@@ -356,21 +356,17 @@ impl MessageFactory {
         match self.session.read_message(&message[..NOISE_MESSAGE_HEADER_SIZE], &mut header) {
             Ok(x) => {
                 assert_eq!(x, 4);
-                return Ok(BigEndian::read_u32(&header[..NOISE_MESSAGE_HEADER_SIZE]));
+                Ok(BigEndian::read_u32(&header[..NOISE_MESSAGE_HEADER_SIZE]))
             },
-            Err(_) => {
-                return Err(ReceiveMessageError::DecryptFail);
-            },
+            Err(_) => Err(ReceiveMessageError::DecryptFail),
         }
     }
 
     pub fn decrypt_message(&mut self, message: Vec<u8>) -> Result<Vec<u8>, ReceiveMessageError> {
         let mut plaintext = [0u8; NOISE_MESSAGE_MAX_SIZE];
         match self.session.read_message(&message, &mut plaintext) {
-            Ok(_len) => {
-                return Ok(plaintext[.._len].to_vec());
-            },
-            Err(_) => return Err(ReceiveMessageError::DecryptFail),
+            Ok(_len) => Ok(plaintext[.._len].to_vec()),
+            Err(_) => Err(ReceiveMessageError::DecryptFail),
         }
     }
 }

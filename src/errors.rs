@@ -22,6 +22,45 @@ use std::io::{self};
 
 use snow::SnowError;
 
+#[derive(Debug)]
+pub enum RekeyError {
+    Wtf,
+    SnowError(SnowError),
+
+}
+
+impl fmt::Display for RekeyError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::RekeyError::*;
+        match self {
+            Wtf => write!(f, "wtf."),
+            SnowError(x) => x.fmt(f),
+        }
+    }
+}
+
+
+impl Error for RekeyError {
+    fn description(&self) -> &str {
+        "I'm a command error."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::RekeyError::*;
+        match self {
+            Wtf => None,
+            SnowError(x) => self.cause(),
+        }
+    }
+}
+
+impl From<SnowError> for RekeyError {
+    fn from(error: snow::SnowError) -> Self {
+        RekeyError::SnowError(error)
+    }
+}
+
+
 
 #[derive(Debug)]
 pub enum CommandError {
@@ -31,6 +70,7 @@ pub enum CommandError {
     TooSmallError,
     GetConsensusDecodeError,
     ConsensusDecodeError,
+
     PostDescriptorDecodeError,
     PostDescriptorStatusDecodeError,
     VoteDecodeError,
@@ -327,18 +367,18 @@ impl From<snow::SnowError> for HandshakeError {
 pub enum SendMessageError {
     InvalidMessageSize,
     EncryptFail,
-    RekeyError,
+    RekeyError(RekeyError),
     IOError(io::Error),
 }
 
 impl fmt::Display for SendMessageError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::SendMessageError::*;
-        match *self {
+        match self {
             InvalidMessageSize => write!(f, "Invalid message size."),
             EncryptFail => write!(f, "Failure to encrypt."),
             IOError(ref x) => x.fmt(f),
-            RekeyError => write!(f, "Failure to rekey."),
+            RekeyError(x) => x.fmt(f),
         }
     }
 }
@@ -350,11 +390,11 @@ impl Error for SendMessageError {
 
     fn cause(&self) -> Option<&Error> {
         use self::SendMessageError::*;
-        match *self {
+        match self {
             InvalidMessageSize => None,
             EncryptFail => None,
             IOError(_) => None,
-            RekeyError => None,
+            RekeyError(x) => x.cause(),
         }
     }
 }
@@ -365,12 +405,20 @@ impl From<io::Error> for SendMessageError {
     }
 }
 
+impl From<RekeyError> for SendMessageError {
+    fn from(error: RekeyError) -> Self {
+        SendMessageError::RekeyError(error)
+    }
+}
+
+
 #[derive(Debug)]
 pub enum ReceiveMessageError {
     InvalidMessageSize,
     DecryptFail,
     CommandError(CommandError),
     IOError(io::Error),
+    RekeyError(RekeyError),
 }
 
 impl fmt::Display for ReceiveMessageError {
@@ -381,6 +429,7 @@ impl fmt::Display for ReceiveMessageError {
             DecryptFail => write!(f, "Failure to encrypt."),
             CommandError(x) => x.fmt(f),
             IOError(ref x) => x.fmt(f),
+            RekeyError(x) => x.fmt(f),
         }
     }
 }
@@ -392,12 +441,19 @@ impl Error for ReceiveMessageError {
 
     fn cause(&self) -> Option<&Error> {
         use self::ReceiveMessageError::*;
-        match *self {
+        match self {
             InvalidMessageSize => None,
             DecryptFail => None,
             CommandError(_) => None,
             IOError(_) => None,
+            RekeyError(x) => x.cause(),
         }
+    }
+}
+
+impl From<RekeyError> for ReceiveMessageError {
+    fn from(error: RekeyError) -> Self {
+        ReceiveMessageError::RekeyError(error)
     }
 }
 

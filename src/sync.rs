@@ -22,7 +22,7 @@ use std::mem;
 use byteorder::{ByteOrder, BigEndian};
 
 use super::commands::{Command};
-use super::errors::{HandshakeError, ReceiveMessageError, SendMessageError};
+use super::errors::{HandshakeError, ReceiveMessageError, SendMessageError, RekeyError};
 use super::messages::{MessageFactory, SessionConfig, PeerAuthenticator};
 use super::constants::{NOISE_HANDSHAKE_MESSAGE1_SIZE, NOISE_HANDSHAKE_MESSAGE2_SIZE,
                        NOISE_HANDSHAKE_MESSAGE3_SIZE};
@@ -127,11 +127,9 @@ impl Session {
         })
     }
 
-    pub fn rekey(&mut self) -> Result<(), SendMessageError> {
-        match self.message_factory.rekey() {
-           Ok(_) => return Ok(()),
-           Err(err) => return Err(SendMessageError::RekeyError),
-        }
+    pub fn rekey(&mut self) -> Result<(), RekeyError> {
+        self.message_factory.rekey()?;
+        Ok(())
     }
 
     pub fn send_command(&mut self, cmd: Command) -> Result<(), SendMessageError> {
