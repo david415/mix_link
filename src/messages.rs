@@ -156,24 +156,6 @@ impl MessageFactory {
         })
     }
 
-    pub fn rekey_key(&mut self) -> Result<Vec<u8>, RekeyError> {
-        let mut new_key = vec![0u8; 32];
-        let payload = vec![0u8; 0];
-        let nonce = u64::MAX;
-        let _ = self.session.write_message_with_nonce(nonce, &payload, &mut new_key)?;
-        Ok(new_key)
-    }
-
-    pub fn rekey(&mut self) -> Result<(), RekeyError> {
-        let new_key = self.rekey_key()?;
-        if self.is_initiator {
-            self.session.rekey(Some(&new_key), None)?;
-        } else {
-            self.session.rekey(None, Some(&new_key))?;
-        }
-        Ok(())
-    }
-
     pub fn client_handshake1(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE1_SIZE], ClientHandshakeError> {
 	// -> (prologue), e, f
         let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];

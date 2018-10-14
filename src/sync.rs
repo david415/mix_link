@@ -16,7 +16,7 @@
 
 extern crate snow;
 
-use std::net::TcpStream;
+use std::net::{TcpStream, Shutdown};
 use std::io::prelude::*;
 use std::mem;
 use byteorder::{ByteOrder, BigEndian};
@@ -62,6 +62,7 @@ impl Session {
             // s -> c
             let mut server_handshake1 = [0; NOISE_HANDSHAKE_MESSAGE2_SIZE];
             tcp_stream.read_exact(&mut server_handshake1)?;
+
             self.message_factory.received_server_handshake1(server_handshake1)?;
 
             // c -> s
@@ -127,11 +128,6 @@ impl Session {
         })
     }
 
-    pub fn rekey(&mut self) -> Result<(), RekeyError> {
-        self.message_factory.rekey()?;
-        Ok(())
-    }
-
     pub fn send_command(&mut self, cmd: Command) -> Result<(), SendMessageError> {
         let ct = cmd.to_vec();
         let ct_len = MAC_LEN + ct.len();
@@ -143,7 +139,6 @@ impl Session {
         to_send.extend(self.message_factory.encrypt_message(ct)?);
 
         // XXX https://github.com/mcginty/snow/issues/35
-        //self.rekey()?;
 
         self.tcp_stream.as_mut().unwrap().write(&to_send)?;
         return Ok(())
@@ -161,13 +156,15 @@ impl Session {
         let body = self.message_factory.decrypt_message(ct)?;
 
         // XXX https://github.com/mcginty/snow/issues/35
-        //self.rekey()?;
 
         let cmd = Command::from_bytes(&body)?;
         return Ok(cmd);
     }
 
-    pub fn close() {}
+    pub fn close(&mut self) {
+        // XXX https://github.com/mcginty/snow/issues/35
+        let _ = self.tcp_stream.as_mut().unwrap().shutdown(Shutdown::Both);
+    }
 
     pub fn peer_credentials() {}
 
@@ -227,6 +224,7 @@ mod tests {
 
                         session = session.into_transport_mode().unwrap();
                         session.finalize_handshake().unwrap();
+                        session.close();
                         return
                     }
                     Err(e) => { println!("connection failed {}", e); }
@@ -254,6 +252,7 @@ mod tests {
 
             session = session.into_transport_mode().unwrap();
             session.finalize_handshake().unwrap();
+            session.close();
         }));
 
         // wait for spawned threads to exit
