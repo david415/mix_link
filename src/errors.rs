@@ -22,9 +22,38 @@ use std::io::{self};
 
 use snow::SnowError;
 
+
+#[derive(Debug)]
+pub enum AuthenticationError {
+    InvalidSize,
+}
+
+impl fmt::Display for AuthenticationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::AuthenticationError::*;
+        match self {
+            InvalidSize => write!(f, "Invalid authentication message size."),
+        }
+    }
+}
+
+
+impl Error for AuthenticationError {
+    fn description(&self) -> &str {
+        "I'm a command error."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::RekeyError::*;
+        match self {
+            InvalidSize => None,
+        }
+    }
+}
+
+
 #[derive(Debug)]
 pub enum RekeyError {
-    Wtf,
     SnowError(SnowError),
 
 }
@@ -33,7 +62,6 @@ impl fmt::Display for RekeyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::RekeyError::*;
         match self {
-            Wtf => write!(f, "wtf."),
             SnowError(x) => x.fmt(f),
         }
     }
@@ -48,7 +76,6 @@ impl Error for RekeyError {
     fn cause(&self) -> Option<&Error> {
         use self::RekeyError::*;
         match self {
-            Wtf => None,
             SnowError(x) => self.cause(),
         }
     }

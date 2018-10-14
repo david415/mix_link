@@ -15,24 +15,25 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 extern crate snow;
+extern crate ecdh_wrapper;
 
 use std::net::{TcpStream, Shutdown};
 use std::io::prelude::*;
 use std::mem;
 use byteorder::{ByteOrder, BigEndian};
 
+use ecdh_wrapper::PublicKey;
+
 use super::commands::{Command};
+use super::errors::{AuthenticationError};
 use super::errors::{HandshakeError, ReceiveMessageError, SendMessageError, RekeyError};
 use super::messages::{MessageFactory, SessionConfig, PeerAuthenticator};
 use super::constants::{NOISE_HANDSHAKE_MESSAGE1_SIZE, NOISE_HANDSHAKE_MESSAGE2_SIZE,
                        NOISE_HANDSHAKE_MESSAGE3_SIZE};
 
 
-pub const MAX_ADDITIONAL_DATA_LEN: usize = 255;
 const MAC_LEN: usize = 16;
 const MAX_MSG_LEN: usize = 1048576;
-const AUTH_LEN: usize = 1 + MAX_ADDITIONAL_DATA_LEN + 4;
-
 
 
 struct Session {
@@ -186,7 +187,6 @@ mod tests {
     use super::{PeerAuthenticator};
     use super::super::messages::{PeerCredentials};
     use super::super::commands::{Command};
-
 
     struct NaiveAuthenticator {}
     impl PeerAuthenticator for NaiveAuthenticator {

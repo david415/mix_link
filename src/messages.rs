@@ -25,7 +25,7 @@ use byteorder::{ByteOrder, BigEndian};
 use snow::Builder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
-use super::errors::{HandshakeError, RekeyError};
+use super::errors::{HandshakeError, RekeyError, AuthenticationError};
 use super::errors::{ClientHandshakeError, ServerHandshakeError, ReceiveMessageError, SendMessageError};
 
 use super::constants::{NOISE_MESSAGE_MAX_SIZE,
@@ -41,37 +41,43 @@ use super::constants::{NOISE_MESSAGE_MAX_SIZE,
                        AUTH_MESSAGE_SIZE};
 
 
+pub const MAX_ADDITIONAL_DATA_LEN: usize = 255;
+const AUTH_LEN: usize = 1 + MAX_ADDITIONAL_DATA_LEN + 4;
+
+
+#[derive(PartialEq)]
+#[derive(Debug)]
 struct AuthenticateMessage {
-    additional_data: Vec<u8>,
+    ad: Vec<u8>,
     unix_time: u32,
 }
 
 impl AuthenticateMessage {
-    fn to_vec(&self) -> Result<Vec<u8>, &'static str> {
-        if self.additional_data.len() > MAX_ADDITIONAL_DATA_SIZE {
-            return Err("additional data exceeds maximum allowed size");
+    pub fn from_bytes(b: &[u8]) -> Result<AuthenticateMessage, AuthenticationError> {
+        if b.len() != AUTH_LEN {
+            return Err(AuthenticationError::InvalidSize)
         }
-        let zero_bytes = [0u8; MAX_ADDITIONAL_DATA_SIZE];
-        let mut out = Vec::new();
-        out.push(self.additional_data.len() as u8);
-        out.extend_from_slice(&self.additional_data);
-        out.extend_from_slice(&zero_bytes[..zero_bytes.len()-self.additional_data.len()]);
-        let mut _time = [0u8; 4];
-        BigEndian::write_u32(&mut _time, self.unix_time);
-        out.extend_from_slice(&_time);
-        Ok(out)
+        let ad_len = b[0] as usize;
+        Ok(AuthenticateMessage{
+            ad: b[1..ad_len+1].to_vec(),
+            unix_time: BigEndian::read_u32(&b[1+MAX_ADDITIONAL_DATA_LEN..]),
+        })
     }
-}
 
-fn authenticate_message_from_bytes(b: &[u8]) -> Result<AuthenticateMessage, &'static str> {
-    if b.len() != AUTH_MESSAGE_SIZE {
-        return Err("authenticate message is not the valid size");
+    pub fn to_vec(&self) -> Result<Vec<u8>, AuthenticationError> {
+        if self.ad.len() > MAX_ADDITIONAL_DATA_LEN {
+            return Err(AuthenticationError::InvalidSize);
+        }
+        let zero_bytes = vec![0u8; MAX_ADDITIONAL_DATA_LEN];
+        let mut b = Vec::new();
+        b.push(self.ad.len() as u8);
+        b.extend(&self.ad);
+        b.extend(&zero_bytes[..zero_bytes.len() - self.ad.len()]);
+        let mut tmp = vec![0u8; 4];
+        BigEndian::write_u32(&mut tmp, self.unix_time);
+        b.extend(&tmp);
+        Ok(b)
     }
-    let ad_len = b[0] as usize;
-    Ok(AuthenticateMessage {
-        additional_data: b[1..1+ad_len].to_vec(),
-        unix_time: BigEndian::read_u32(&b[1+MAX_ADDITIONAL_DATA_SIZE..]),
-    })
 }
 
 pub struct PeerCredentials {
@@ -181,11 +187,10 @@ impl MessageFactory {
         let now = SystemTime::now();
         let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
         let our_auth = AuthenticateMessage {
-            additional_data: self.additional_data.clone(),
+            ad: self.additional_data.clone(),
             unix_time: now.elapsed().unwrap().as_secs() as u32,
         };
-        let raw_auth = our_auth.to_vec().unwrap();
-        let _len = match self.session.write_message(&raw_auth, &mut msg) {
+        let _len = match self.session.write_message(&our_auth.to_vec().unwrap(), &mut msg) {
             Ok(x) => x,
             Err(_) => return Err(ClientHandshakeError::Noise3WriteError),
         };
@@ -201,7 +206,7 @@ impl MessageFactory {
             Ok(x) => x,
             Err(_) => return Err(ClientHandshakeError::Noise2ReadError),
         };
-        let auth_msg = match authenticate_message_from_bytes(&_raw_auth) {
+        let auth_msg = match AuthenticateMessage::from_bytes(&_raw_auth) {
             Ok(x) => x,
             Err(_) => return Err(ClientHandshakeError::AuthenticationError),
         };
@@ -215,7 +220,7 @@ impl MessageFactory {
             Err(_y) => return Err(ClientHandshakeError::FailedToDecodeRemoteStatic),
         }
         let peer_credentials = PeerCredentials {
-            additional_data: auth_msg.additional_data,
+            additional_data: auth_msg.ad,
             public_key: peer_key,
         };
         if !self.authenticator.is_peer_valid(&peer_credentials) {
@@ -242,12 +247,11 @@ impl MessageFactory {
         // send server's handshake1 message
         let now = SystemTime::now();
         let our_auth = AuthenticateMessage {
-            additional_data: self.additional_data.clone(),
+            ad: self.additional_data.clone(),
             unix_time: now.elapsed().unwrap().as_secs() as u32,
         };
-        let raw_auth = our_auth.to_vec().unwrap();
         let mut mesg = [0u8; NOISE_HANDSHAKE_MESSAGE2_SIZE];
-        let mut _len = match self.session.write_message(&raw_auth, &mut mesg) {
+        let mut _len = match self.session.write_message(&our_auth.to_vec().unwrap(), &mut mesg) {
             Ok(x) => x,
             Err(_) => return Err(ServerHandshakeError::Noise2WriteError),
         };
@@ -269,7 +273,7 @@ impl MessageFactory {
             Ok(x) => x,
             Err(_) => return Err(ServerHandshakeError::Noise3ReadError),
         };
-        let peer_auth = authenticate_message_from_bytes(&raw_auth).unwrap();
+        let peer_auth = AuthenticateMessage::from_bytes(&raw_auth).unwrap();
         let raw_peer_key = self.session.get_remote_static().unwrap();
         let mut peer_key = PublicKey::default();
         match peer_key.from_bytes(raw_peer_key) {
@@ -277,7 +281,7 @@ impl MessageFactory {
             Err(_) => return Err(ServerHandshakeError::FailedToDecodeRemoteStatic),
         }
         let peer_credentials = PeerCredentials {
-            additional_data: peer_auth.additional_data,
+            additional_data: peer_auth.ad,
             public_key: peer_key,
         };
         if !self.authenticator.is_peer_valid(&peer_credentials) {
@@ -366,6 +370,17 @@ mod tests {
     use super::{PeerAuthenticator, PeerCredentials};
     use super::super::commands::Command;
     use super::*;
+
+    #[test]
+    fn authentication_message_test() {
+        let auth1 = AuthenticateMessage{
+            ad: vec![1,2,3],
+            unix_time: 321,
+        };
+        let raw = auth1.to_vec().unwrap();
+        let auth2 = AuthenticateMessage::from_bytes(&raw).unwrap();
+        assert_eq!(auth1, auth2);
+    }
 
     struct NaiveAuthenticator {}
     impl PeerAuthenticator for NaiveAuthenticator {
