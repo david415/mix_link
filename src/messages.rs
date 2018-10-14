@@ -395,7 +395,7 @@ mod tests {
 
         // server
         let server_authenticator = NaiveAuthenticator{};
-        let server_keypair = PrivateKey::generate(&mut r).unwrap();
+        let server_keypair = PrivateKey::generate(&mut r);
         let server_config = SessionConfig {
             authenticator: Box::new(server_authenticator),
             authentication_key: server_keypair,
@@ -406,7 +406,7 @@ mod tests {
 
         // client
         let client_authenticator = NaiveAuthenticator{};
-        let client_keypair = PrivateKey::generate(&mut r).unwrap();
+        let client_keypair = PrivateKey::generate(&mut r);
         let client_config = SessionConfig {
             authenticator: Box::new(client_authenticator),
             authentication_key: client_keypair,

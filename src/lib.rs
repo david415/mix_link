@@ -51,7 +51,7 @@ mod tests {
         let mut r = OsRng::new().expect("failure to create an OS RNG");
 
         // server
-        let server_keypair = PrivateKey::generate(&mut r).unwrap();
+        let server_keypair = PrivateKey::generate(&mut r);
         let server_builder: Builder = Builder::new(noise_params.clone());
         let mut server_session = server_builder
             .local_private_key(&server_keypair.to_vec())
@@ -61,7 +61,7 @@ mod tests {
         let mut server_out = [0u8; 65535];
 
         // client
-        let client_keypair = PrivateKey::generate(&mut r).unwrap();
+        let client_keypair = PrivateKey::generate(&mut r);
         let client_builder: Builder = Builder::new(noise_params.clone());
         let mut client_session = client_builder
             .local_private_key(&client_keypair.to_vec())

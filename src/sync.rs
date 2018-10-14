@@ -200,7 +200,7 @@ mod tests {
         let mut threads = vec![];
         let server_addr = "127.0.0.1:8000";
         let mut rng = OsRng::new().expect("failure to create an OS RNG");
-        let server_keypair = PrivateKey::generate(&mut rng).unwrap();
+        let server_keypair = PrivateKey::generate(&mut rng);
         
         // server listener
         threads.push(thread::spawn(move|| {
@@ -237,7 +237,7 @@ mod tests {
             thread::sleep(Duration::from_secs(1));
             // client
             let client_authenticator = NaiveAuthenticator{};
-            let client_keypair = PrivateKey::generate(&mut rng).unwrap();
+            let client_keypair = PrivateKey::generate(&mut rng);
             let client_config = SessionConfig {
                 authenticator: Box::new(client_authenticator),
                 authentication_key: client_keypair,

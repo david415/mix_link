@@ -553,7 +553,7 @@ mod tests {
         assert_eq!(post_descriptor_status_bytes, post_descriptor_status2_bytes);
 
         // test vote
-        let private_key = PrivateKey::generate(&mut r).unwrap();
+        let private_key = PrivateKey::generate(&mut r);
         let public_key = private_key.public_key();
         let vote = Command::Vote{
             epoch: 123,
