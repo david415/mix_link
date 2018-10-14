@@ -102,7 +102,7 @@ pub enum State {
 }
 
 pub struct SessionConfig {
-    pub authenticator: Box<PeerAuthenticator+Send>,
+    pub authenticator: Box<PeerAuthenticator>,
     pub authentication_key: PrivateKey,
     pub peer_public_key: Option<PublicKey>,
     pub additional_data: Vec<u8>,
@@ -112,7 +112,7 @@ pub struct MessageFactory {
     session: snow::Session,
     state: State,
     additional_data: Vec<u8>,
-    authenticator: Box<PeerAuthenticator+Send>,
+    authenticator: Box<PeerAuthenticator>,
     is_initiator: bool,
 }
 
