@@ -142,7 +142,8 @@ impl Session {
         let mut to_send = vec![];
         to_send.extend(self.message_factory.encrypt_message(ct)?);
 
-        self.rekey();
+        // XXX https://github.com/mcginty/snow/issues/35
+        //self.rekey()?;
 
         self.tcp_stream.as_mut().unwrap().write(&to_send)?;
         return Ok(())
@@ -159,7 +160,8 @@ impl Session {
         self.tcp_stream.as_mut().unwrap().read_exact(&mut ct)?;
         let body = self.message_factory.decrypt_message(ct)?;
 
-        self.rekey();
+        // XXX https://github.com/mcginty/snow/issues/35
+        //self.rekey()?;
 
         let cmd = Command::from_bytes(&body)?;
         return Ok(cmd);
