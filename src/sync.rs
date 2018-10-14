@@ -19,21 +19,16 @@ extern crate ecdh_wrapper;
 
 use std::net::{TcpStream, Shutdown};
 use std::io::prelude::*;
-use std::mem;
-use byteorder::{ByteOrder, BigEndian};
-
-use ecdh_wrapper::PublicKey;
 
 use super::commands::{Command};
-use super::errors::{AuthenticationError};
-use super::errors::{HandshakeError, ReceiveMessageError, SendMessageError, RekeyError};
-use super::messages::{MessageFactory, SessionConfig, PeerAuthenticator};
+use super::errors::{HandshakeError, ReceiveMessageError, SendMessageError};
+use super::messages::{MessageFactory, SessionConfig};
 use super::constants::{NOISE_HANDSHAKE_MESSAGE1_SIZE, NOISE_HANDSHAKE_MESSAGE2_SIZE,
                        NOISE_HANDSHAKE_MESSAGE3_SIZE};
 
 
 const MAC_LEN: usize = 16;
-const MAX_MSG_LEN: usize = 1048576;
+const MAX_MSG_LEN: usize = 1_048_576;
 
 
 struct Session {
@@ -44,11 +39,11 @@ struct Session {
 
 impl Session {
     pub fn new(cfg: SessionConfig, is_initiator: bool) -> Result<Session, HandshakeError> {
-        return Ok(Session{
+        Ok(Session{
             tcp_stream: None,
-            is_initiator: is_initiator,
+            is_initiator,
             message_factory: MessageFactory::new(cfg, is_initiator)?,
-        });
+        })
     }
 
     fn handshake(&mut self) -> Result<(), HandshakeError>{
@@ -57,7 +52,7 @@ impl Session {
 
             // c -> s
             let client_handshake1 = self.message_factory.client_handshake1()?;
-            let _ = tcp_stream.write(&client_handshake1)?;
+            tcp_stream.write_all(&client_handshake1)?;
             self.message_factory.sent_client_handshake1();
 
             // s -> c
@@ -68,7 +63,7 @@ impl Session {
 
             // c -> s
             let client_handshake2 = self.message_factory.client_handshake2()?;
-            tcp_stream.write(&client_handshake2)?;
+            tcp_stream.write_all(&client_handshake2)?;
             self.message_factory.sent_client_handshake2();
 
             return Ok(());
@@ -81,16 +76,15 @@ impl Session {
             let server_handshake1 = self.message_factory.received_client_handshake1(client_handshake1).unwrap();
 
             // s -> c
-            tcp_stream.write(&server_handshake1)?;
+            tcp_stream.write_all(&server_handshake1)?;
             self.message_factory.sent_server_handshake1();
 
             // c -> s
             let mut client_handshake2 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
             tcp_stream.read_exact(&mut client_handshake2)?;
             self.message_factory.received_client_handshake2(client_handshake2).unwrap();
-
-            return Ok(())
         }
+        Ok(())
     }
 
     pub fn finalize_handshake(&mut self) -> Result<(), HandshakeError>{
@@ -102,8 +96,8 @@ impl Session {
             }
         }
         let cmd = Command::NoOp{};
-        self.send_command(cmd).unwrap();
-        return Ok(());
+        self.send_command(&cmd).unwrap();
+        Ok(())
     }
         
     /// initialize a link layer session
@@ -118,7 +112,7 @@ impl Session {
     pub fn initialize(&mut self, tcp_stream: TcpStream) -> Result<(), HandshakeError>{
         self.tcp_stream = Some(tcp_stream);
         self.handshake()?;
-        return Ok(());
+        Ok(())
     }
 
     pub fn into_transport_mode(self) -> Result<Self, HandshakeError> {
@@ -129,7 +123,7 @@ impl Session {
         })
     }
 
-    pub fn send_command(&mut self, cmd: Command) -> Result<(), SendMessageError> {
+    pub fn send_command(&mut self, cmd: &Command) -> Result<(), SendMessageError> {
         let ct = cmd.to_vec();
         let ct_len = MAC_LEN + ct.len();
         if ct_len > MAX_MSG_LEN {
@@ -137,29 +131,28 @@ impl Session {
         }
 
         let mut to_send = vec![];
-        to_send.extend(self.message_factory.encrypt_message(ct)?);
+        to_send.extend(self.message_factory.encrypt_message(&ct)?);
 
         // XXX https://github.com/mcginty/snow/issues/35
 
-        self.tcp_stream.as_mut().unwrap().write(&to_send)?;
-        return Ok(())
+        self.tcp_stream.as_mut().unwrap().write_all(&to_send)?;
+        Ok(())
     }
 
     pub fn recv_command(&mut self) -> Result<Command, ReceiveMessageError> {
         // Read, decrypt and parse the ciphertext header.
         let mut header_ciphertext = vec![0u8; MAC_LEN + 4];
         self.tcp_stream.as_mut().unwrap().read_exact(&mut header_ciphertext)?;
-        let ct_len = self.message_factory.decrypt_message_header(header_ciphertext.to_vec())?;
+        let ct_len = self.message_factory.decrypt_message_header(&header_ciphertext.to_vec())?;
 
         // Read and decrypt the ciphertext.
         let mut ct = vec![0u8; ct_len as usize];
         self.tcp_stream.as_mut().unwrap().read_exact(&mut ct)?;
-        let body = self.message_factory.decrypt_message(ct)?;
+        let body = self.message_factory.decrypt_message(&ct)?;
 
         // XXX https://github.com/mcginty/snow/issues/35
 
-        let cmd = Command::from_bytes(&body)?;
-        return Ok(cmd);
+        Ok(Command::from_bytes(&body)?)
     }
 
     pub fn close(&mut self) {
@@ -184,9 +177,7 @@ mod tests {
     use self::rand::os::OsRng;
     use ecdh_wrapper::PrivateKey;
     use super::{Session, SessionConfig};
-    use super::{PeerAuthenticator};
-    use super::super::messages::{PeerCredentials};
-    use super::super::commands::{Command};
+    use super::super::messages::{PeerCredentials, PeerAuthenticator};
 
     struct NaiveAuthenticator {}
     impl PeerAuthenticator for NaiveAuthenticator {

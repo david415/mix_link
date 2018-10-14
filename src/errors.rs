@@ -44,7 +44,7 @@ impl Error for AuthenticationError {
     }
 
     fn cause(&self) -> Option<&Error> {
-        use self::RekeyError::*;
+        use self::AuthenticationError::*;
         match self {
             InvalidSize => None,
         }
@@ -76,7 +76,7 @@ impl Error for RekeyError {
     fn cause(&self) -> Option<&Error> {
         use self::RekeyError::*;
         match self {
-            SnowError(x) => self.cause(),
+            SnowError(_) => None,
         }
     }
 }

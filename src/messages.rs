@@ -18,14 +18,13 @@ extern crate snow;
 extern crate ecdh_wrapper;
 
 use std::time::SystemTime;
-use std::u64;
 
 use subtle::ConstantTimeEq;
 use byteorder::{ByteOrder, BigEndian};
 use snow::Builder;
 use ecdh_wrapper::{PrivateKey, PublicKey};
 
-use super::errors::{HandshakeError, RekeyError, AuthenticationError};
+use super::errors::{HandshakeError, AuthenticationError};
 use super::errors::{ClientHandshakeError, ServerHandshakeError, ReceiveMessageError, SendMessageError};
 
 use super::constants::{NOISE_MESSAGE_MAX_SIZE,
@@ -40,11 +39,6 @@ use super::constants::{NOISE_MESSAGE_MAX_SIZE,
                        MAX_ADDITIONAL_DATA_SIZE,
                        AUTH_MESSAGE_SIZE};
 
-
-pub const MAX_ADDITIONAL_DATA_LEN: usize = 255;
-const AUTH_LEN: usize = 1 + MAX_ADDITIONAL_DATA_LEN + 4;
-
-
 #[derive(PartialEq)]
 #[derive(Debug)]
 struct AuthenticateMessage {
@@ -54,21 +48,21 @@ struct AuthenticateMessage {
 
 impl AuthenticateMessage {
     pub fn from_bytes(b: &[u8]) -> Result<AuthenticateMessage, AuthenticationError> {
-        if b.len() != AUTH_LEN {
+        if b.len() != AUTH_MESSAGE_SIZE {
             return Err(AuthenticationError::InvalidSize)
         }
         let ad_len = b[0] as usize;
         Ok(AuthenticateMessage{
-            ad: b[1..ad_len+1].to_vec(),
-            unix_time: BigEndian::read_u32(&b[1+MAX_ADDITIONAL_DATA_LEN..]),
+            ad: b[1..=ad_len].to_vec(),
+            unix_time: BigEndian::read_u32(&b[1+MAX_ADDITIONAL_DATA_SIZE..]),
         })
     }
 
     pub fn to_vec(&self) -> Result<Vec<u8>, AuthenticationError> {
-        if self.ad.len() > MAX_ADDITIONAL_DATA_LEN {
+        if self.ad.len() > MAX_ADDITIONAL_DATA_SIZE {
             return Err(AuthenticationError::InvalidSize);
         }
-        let zero_bytes = vec![0u8; MAX_ADDITIONAL_DATA_LEN];
+        let zero_bytes = vec![0u8; MAX_ADDITIONAL_DATA_SIZE];
         let mut b = Vec::new();
         b.push(self.ad.len() as u8);
         b.extend(&self.ad);
@@ -127,7 +121,7 @@ impl MessageFactory {
         }
         let noise_builder: Builder = Builder::new(noise_params);
         if is_initiator {
-            if !config.peer_public_key.is_some() {
+            if config.peer_public_key.is_none() {
                 return Err(HandshakeError::NoPeerKeyError);
             }
             let session = match noise_builder
@@ -302,7 +296,7 @@ impl MessageFactory {
         })
     }
 
-    pub fn encrypt_message(&mut self, message: Vec<u8>) -> Result<Vec<u8>, SendMessageError> {
+    pub fn encrypt_message(&mut self, message: &[u8]) -> Result<Vec<u8>, SendMessageError> {
         let ct_len = MAC_SIZE + message.len();
         if ct_len > NOISE_MESSAGE_MAX_SIZE {
             return Err(SendMessageError::InvalidMessageSize);
@@ -337,7 +331,7 @@ impl MessageFactory {
         Ok(output)
     }
 
-    pub fn decrypt_message_header(&mut self, message: Vec<u8>) -> Result<u32, ReceiveMessageError> {
+    pub fn decrypt_message_header(&mut self, message: &[u8]) -> Result<u32, ReceiveMessageError> {
         let mut header = [0u8; NOISE_MESSAGE_MAX_SIZE];
         match self.session.read_message(&message[..NOISE_MESSAGE_HEADER_SIZE], &mut header) {
             Ok(x) => {
@@ -348,7 +342,7 @@ impl MessageFactory {
         }
     }
 
-    pub fn decrypt_message(&mut self, message: Vec<u8>) -> Result<Vec<u8>, ReceiveMessageError> {
+    pub fn decrypt_message(&mut self, message: &[u8]) -> Result<Vec<u8>, ReceiveMessageError> {
         let mut plaintext = [0u8; NOISE_MESSAGE_MAX_SIZE];
         match self.session.read_message(&message, &mut plaintext) {
             Ok(_len) => Ok(plaintext[.._len].to_vec()),
@@ -441,17 +435,17 @@ mod tests {
             payload: vec![0u8; USER_FORWARD_PAYLOAD_SIZE],
         };
         let server_message = server_cmd.clone().to_vec();
-        let to_send = server_session.encrypt_message(server_message.clone()).unwrap();
+        let to_send = server_session.encrypt_message(&server_message.clone()).unwrap();
 
-        let _mesg_len = client_session.decrypt_message_header(to_send.clone()).unwrap();
-        let raw_cmd = client_session.decrypt_message(to_send[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
+        let _mesg_len = client_session.decrypt_message_header(&to_send.clone()).unwrap();
+        let raw_cmd = client_session.decrypt_message(&to_send[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
         assert_eq!(server_message, raw_cmd);
 
         let client_cmd = Command::NoOp{};
         let client_message = client_cmd.clone().to_vec();
-        let client_to_send = client_session.encrypt_message(client_message.clone()).unwrap();
-        let _mesg_len = server_session.decrypt_message_header(client_to_send.clone()).unwrap();
-        let raw_cmd = server_session.decrypt_message(client_to_send[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
+        let client_to_send = client_session.encrypt_message(&client_message.clone()).unwrap();
+        let _mesg_len = server_session.decrypt_message_header(&client_to_send.clone()).unwrap();
+        let raw_cmd = server_session.decrypt_message(&client_to_send[NOISE_MESSAGE_HEADER_SIZE..].to_vec()).unwrap();
         assert_eq!(raw_cmd, client_message);
     }
 }
