@@ -58,15 +58,12 @@ impl Session {
             // s -> c
             let mut server_handshake1 = [0; NOISE_HANDSHAKE_MESSAGE2_SIZE];
             tcp_stream.read_exact(&mut server_handshake1)?;
-
             self.message_factory.received_server_handshake1(server_handshake1)?;
 
             // c -> s
             let client_handshake2 = self.message_factory.client_handshake2()?;
             tcp_stream.write_all(&client_handshake2)?;
             self.message_factory.sent_client_handshake2();
-
-            return Ok(());
         } else {
             let tcp_stream = self.tcp_stream.as_mut().unwrap();
 
@@ -160,9 +157,14 @@ impl Session {
         let _ = self.tcp_stream.as_mut().unwrap().shutdown(Shutdown::Both);
     }
 
-    pub fn peer_credentials() {}
+    // XXX fix me
+    // pub fn peer_credentials(&'a self) -> &'a PeerCredentials {
+    //     self.message_factory.peer_credentials()
+    // }
 
-    pub fn clock_skew() {}    
+    pub fn clock_skew(&self) -> u64 {
+        self.message_factory.clock_skew()
+    }
 }
 
 #[cfg(test)]

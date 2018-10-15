@@ -17,7 +17,7 @@
 extern crate snow;
 extern crate ecdh_wrapper;
 
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use subtle::ConstantTimeEq;
 use byteorder::{ByteOrder, BigEndian};
@@ -43,7 +43,7 @@ use super::constants::{NOISE_MESSAGE_MAX_SIZE,
 #[derive(Debug)]
 struct AuthenticateMessage {
     ad: Vec<u8>,
-    unix_time: u32,
+    unix_time: u64, // Seconds since unix epoch.
 }
 
 impl AuthenticateMessage {
@@ -54,7 +54,7 @@ impl AuthenticateMessage {
         let ad_len = b[0] as usize;
         Ok(AuthenticateMessage{
             ad: b[1..=ad_len].to_vec(),
-            unix_time: BigEndian::read_u32(&b[1+MAX_ADDITIONAL_DATA_SIZE..]),
+            unix_time: BigEndian::read_u64(&b[1+MAX_ADDITIONAL_DATA_SIZE..]),
         })
     }
 
@@ -67,13 +67,14 @@ impl AuthenticateMessage {
         b.push(self.ad.len() as u8);
         b.extend(&self.ad);
         b.extend(&zero_bytes[..zero_bytes.len() - self.ad.len()]);
-        let mut tmp = vec![0u8; 4];
-        BigEndian::write_u32(&mut tmp, self.unix_time);
+        let mut tmp = vec![0u8; 8];
+        BigEndian::write_u64(&mut tmp, self.unix_time);
         b.extend(&tmp);
         Ok(b)
     }
 }
 
+#[derive(PartialEq, Debug, Clone)]
 pub struct PeerCredentials {
     pub additional_data: Vec<u8>,
     pub public_key: PublicKey,
@@ -108,6 +109,8 @@ pub struct MessageFactory {
     additional_data: Vec<u8>,
     authenticator: Box<PeerAuthenticator>,
     is_initiator: bool,
+    clock_skew: u64,
+    peer_credentials: Option<Box<PeerCredentials>>,
 }
 
 impl MessageFactory {
@@ -138,6 +141,8 @@ impl MessageFactory {
                 authenticator: config.authenticator,
                 session,
                 is_initiator,
+                clock_skew: 0,
+                peer_credentials: None,
             });
         }
         let session = match noise_builder
@@ -153,7 +158,17 @@ impl MessageFactory {
             authenticator: config.authenticator,
             session,
             is_initiator,
+            clock_skew: 0,
+            peer_credentials: None,
         })
+    }
+
+    pub fn peer_credentials(&self) -> &PeerCredentials {
+        self.peer_credentials.as_ref().unwrap()
+    }
+
+    pub fn clock_skew(&self) -> u64 {
+        self.clock_skew
     }
 
     pub fn client_handshake1(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE1_SIZE], ClientHandshakeError> {
@@ -177,33 +192,19 @@ impl MessageFactory {
         self.state = State::DataTransfer;
     }
 
-    pub fn client_handshake2(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE3_SIZE], ClientHandshakeError> {
-        let now = SystemTime::now();
-        let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
-        let our_auth = AuthenticateMessage {
-            ad: self.additional_data.clone(),
-            unix_time: now.elapsed().unwrap().as_secs() as u32,
-        };
-        let _len = match self.session.write_message(&our_auth.to_vec().unwrap(), &mut msg) {
-            Ok(x) => x,
-            Err(_) => return Err(ClientHandshakeError::Noise3WriteError),
-        };
-        assert_eq!(NOISE_HANDSHAKE_MESSAGE3_SIZE, _len);
-        let mut _msg3 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
-        _msg3.copy_from_slice(&msg[..NOISE_HANDSHAKE_MESSAGE3_SIZE]);
-        Ok(_msg3)
-    }
-
     pub fn received_server_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE2_SIZE]) -> Result<(), ClientHandshakeError> {
-        let mut _raw_auth = [0u8; AUTH_MESSAGE_SIZE];
-        let _len = match self.session.read_message(&message, &mut _raw_auth) {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let mut raw_auth = [0u8; AUTH_MESSAGE_SIZE];
+        let _len = match self.session.read_message(&message, &mut raw_auth) {
             Ok(x) => x,
             Err(_) => return Err(ClientHandshakeError::Noise2ReadError),
         };
-        let auth_msg = match AuthenticateMessage::from_bytes(&_raw_auth) {
+        let peer_auth = match AuthenticateMessage::from_bytes(&raw_auth) {
             Ok(x) => x,
             Err(_) => return Err(ClientHandshakeError::AuthenticationError),
         };
+
+        // Authenticate the peer.
         let raw_peer_key = match self.session.get_remote_static() {
             Some(x) => x,
             None => return Err(ClientHandshakeError::FailedToGetRemoteStatic),
@@ -213,15 +214,37 @@ impl MessageFactory {
             Ok(_x) => {},
             Err(_y) => return Err(ClientHandshakeError::FailedToDecodeRemoteStatic),
         }
-        let peer_credentials = PeerCredentials {
-            additional_data: auth_msg.ad,
+        self.peer_credentials = Some(Box::new(PeerCredentials {
+            additional_data: peer_auth.ad,
             public_key: peer_key,
-        };
-        if !self.authenticator.is_peer_valid(&peer_credentials) {
+        }));
+        let peer_key = self.peer_credentials.as_ref().unwrap();
+        if !self.authenticator.is_peer_valid(peer_key) {
             return Err(ClientHandshakeError::AuthenticationError);
         }
+
+        // Cache the clock skew.
+        let peer_clock = peer_auth.unix_time;
+        self.clock_skew = now - peer_clock;
+
         self.state = State::ReceivedServerHandshake1;
         Ok(())
+    }
+
+    pub fn client_handshake2(&mut self) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE3_SIZE], ClientHandshakeError> {
+        let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
+        let our_auth = AuthenticateMessage {
+            ad: self.additional_data.clone(),
+            unix_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+        };
+        let _len = match self.session.write_message(&our_auth.to_vec().unwrap(), &mut msg) {
+            Ok(x) => x,
+            Err(_) => return Err(ClientHandshakeError::Noise3WriteError),
+        };
+        assert_eq!(NOISE_HANDSHAKE_MESSAGE3_SIZE, _len);
+        let mut _msg3 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
+        _msg3.copy_from_slice(&msg[..NOISE_HANDSHAKE_MESSAGE3_SIZE]);
+        Ok(_msg3)
     }
 
     pub fn received_client_handshake1(&mut self, message: [u8; NOISE_HANDSHAKE_MESSAGE1_SIZE]) -> Result<[u8; NOISE_HANDSHAKE_MESSAGE2_SIZE], ServerHandshakeError> {
@@ -239,10 +262,9 @@ impl MessageFactory {
         self.state = State::ReceivedClientHandshake1;
 
         // send server's handshake1 message
-        let now = SystemTime::now();
         let our_auth = AuthenticateMessage {
             ad: self.additional_data.clone(),
-            unix_time: now.elapsed().unwrap().as_secs() as u32,
+            unix_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
         };
         let mut mesg = [0u8; NOISE_HANDSHAKE_MESSAGE2_SIZE];
         let mut _len = match self.session.write_message(&our_auth.to_vec().unwrap(), &mut mesg) {
@@ -274,11 +296,12 @@ impl MessageFactory {
             Ok(_) => {},
             Err(_) => return Err(ServerHandshakeError::FailedToDecodeRemoteStatic),
         }
-        let peer_credentials = PeerCredentials {
+        self.peer_credentials = Some(Box::new(PeerCredentials {
             additional_data: peer_auth.ad,
             public_key: peer_key,
-        };
-        if !self.authenticator.is_peer_valid(&peer_credentials) {
+        }));
+        let peer_key = self.peer_credentials.as_ref().unwrap();
+        if !self.authenticator.is_peer_valid(peer_key) {
             return Err(ServerHandshakeError::AuthenticationError);
         }
         self.state = State::DataTransfer;
@@ -293,6 +316,8 @@ impl MessageFactory {
             additional_data: self.additional_data,
             authenticator: self.authenticator,
             is_initiator: self.is_initiator,
+            clock_skew: self.clock_skew,
+            peer_credentials: self.peer_credentials,
         })
     }
 
