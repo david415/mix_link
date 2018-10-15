@@ -30,7 +30,7 @@ use super::constants::{NOISE_HANDSHAKE_MESSAGE1_SIZE, NOISE_HANDSHAKE_MESSAGE2_S
 const MAC_LEN: usize = 16;
 const MAX_MSG_LEN: usize = 1_048_576;
 
-
+/// A mixnet link layer protocol session.
 struct Session {
     tcp_stream: Option<TcpStream>,
     is_initiator: bool,
@@ -38,6 +38,7 @@ struct Session {
 }
 
 impl Session {
+
     pub fn new(cfg: SessionConfig, is_initiator: bool) -> Result<Session, HandshakeError> {
         Ok(Session{
             tcp_stream: None,
@@ -97,15 +98,6 @@ impl Session {
         Ok(())
     }
         
-    /// initialize a link layer session
-    ///
-    /// # Arguments
-    ///
-    /// * tcp_stream: A TCP stream.
-    ///
-    /// # Returns
-    ///
-    /// * Returns a result.
     pub fn initialize(&mut self, tcp_stream: TcpStream) -> Result<(), HandshakeError>{
         self.tcp_stream = Some(tcp_stream);
         self.handshake()?;

@@ -96,6 +96,7 @@ pub enum State {
     Invalid,
 }
 
+/// A session configuration type.
 pub struct SessionConfig {
     pub authenticator: Box<PeerAuthenticator>,
     pub authentication_key: PrivateKey,
@@ -103,6 +104,7 @@ pub struct SessionConfig {
     pub additional_data: Vec<u8>,
 }
 
+/// A cryptographic protocol message factory type.
 pub struct MessageFactory {
     session: snow::Session,
     state: State,
