@@ -22,7 +22,7 @@ use std::io::prelude::*;
 
 use super::commands::{Command};
 use super::errors::{HandshakeError, ReceiveMessageError, SendMessageError};
-use super::messages::{MessageFactory, SessionConfig};
+use super::messages::{MessageFactory, SessionConfig, PeerCredentials};
 use super::constants::{NOISE_HANDSHAKE_MESSAGE1_SIZE, NOISE_HANDSHAKE_MESSAGE2_SIZE,
                        NOISE_HANDSHAKE_MESSAGE3_SIZE};
 
@@ -157,10 +157,9 @@ impl Session {
         let _ = self.tcp_stream.as_mut().unwrap().shutdown(Shutdown::Both);
     }
 
-    // XXX fix me
-    // pub fn peer_credentials(&'a self) -> &'a PeerCredentials {
-    //     self.message_factory.peer_credentials()
-    // }
+    pub fn peer_credentials(&self) -> &PeerCredentials {
+        self.message_factory.peer_credentials()
+    }
 
     pub fn clock_skew(&self) -> u64 {
         self.message_factory.clock_skew()
