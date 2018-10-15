@@ -33,6 +33,19 @@ the rust noise library such that it would have HFS mode, that is the
 PQ hybrid forward secrecy mode via New Hope Simple.
 
 
+# Usage
+
+To import `mix_link`, add the following to the dependencies section of
+your project's `Cargo.toml`:
+```toml
+mix_link = "^0.0.0"
+```
+Then import the crate as:
+```rust,no_run
+extern crate mix_link;
+```
+
+
 # acknowledgments
 
 Thanks to Yawning Angel for the design of this wire protocol.
