@@ -237,7 +237,9 @@ impl MessageFactory {
         let mut msg = [0u8; NOISE_MESSAGE_MAX_SIZE];
         let our_auth = AuthenticateMessage {
             ad: self.additional_data.clone(),
-            unix_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            // Clients should always send a zero unix_time so they don't
+            // leak their system time to the peer.
+            unix_time: 0,
         };
         let _len = match self.session.write_message(&our_auth.to_vec().unwrap(), &mut msg) {
             Ok(x) => x,
