@@ -1,6 +1,6 @@
 [package]
 name = "mix_link"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["David Stainton <dstainton415@gmail.com>"]
 description = "message oriented noise based cryptographic link layer for mixnets"
 keywords = ["cryptography", "noise", "network", "mixnet", "link-layer"]
@@ -8,9 +8,9 @@ license = "AGPL-3.0-only"
 
 [dependencies]
 snow = "0.4.0"
-ecdh_wrapper = "0.0.4"
+ecdh_wrapper = "0.0.5"
 byteorder = "1.2.2"
-sphinxcrypto = "0.0.9"
+sphinxcrypto = "0.0.10"
 
 [dependencies.subtle]
 version = "1"

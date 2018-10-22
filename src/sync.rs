@@ -31,7 +31,7 @@ const MAC_LEN: usize = 16;
 const MAX_MSG_LEN: usize = 1_048_576;
 
 /// A mixnet link layer protocol session.
-struct Session {
+pub struct Session {
     tcp_stream: Option<TcpStream>,
     is_initiator: bool,
     message_factory: MessageFactory,
@@ -170,14 +170,7 @@ mod tests {
     use self::rand::os::OsRng;
     use ecdh_wrapper::PrivateKey;
     use super::{Session, SessionConfig};
-    use super::super::messages::{PeerCredentials, PeerAuthenticator};
-
-    struct NaiveAuthenticator {}
-    impl PeerAuthenticator for NaiveAuthenticator {
-        fn is_peer_valid(&self, _peer_credentials: &PeerCredentials) -> bool {
-            return true;
-        }
-    }
+    use super::super::messages::{PeerAuthenticator, ProviderAuthenticatorState, ClientAuthenticatorState};
 
     #[test]
     fn handshake_test() {
@@ -185,15 +178,24 @@ mod tests {
         let server_addr = "127.0.0.1:8000";
         let mut rng = OsRng::new().expect("failure to create an OS RNG");
         let server_keypair = PrivateKey::generate(&mut rng);
+        let client_keypair = PrivateKey::generate(&mut rng);
+
+        let mut provider_auth = ProviderAuthenticatorState::default();
+        provider_auth.client_map.insert(client_keypair.public_key(), true);
+        let provider_authenticator = PeerAuthenticator::Provider(provider_auth);
+
+        let mut client_auth = ClientAuthenticatorState::default();
+        client_auth.peer_public_key = server_keypair.public_key();
+        let client_authenticator = PeerAuthenticator::Client(client_auth);
+
         
         // server listener
         threads.push(thread::spawn(move|| {
             let listener = TcpListener::bind(server_addr.clone()).expect("could not start server");
 
             // server
-            let server_authenticator = NaiveAuthenticator{};
             let server_config = SessionConfig {
-                authenticator: Box::new(server_authenticator),
+                authenticator: provider_authenticator,
                 authentication_key: server_keypair,
                 peer_public_key: None,
                 additional_data: vec![],
@@ -220,10 +222,8 @@ mod tests {
         threads.push(thread::spawn(move|| {
             thread::sleep(Duration::from_secs(1));
             // client
-            let client_authenticator = NaiveAuthenticator{};
-            let client_keypair = PrivateKey::generate(&mut rng);
             let client_config = SessionConfig {
-                authenticator: Box::new(client_authenticator),
+                authenticator: client_authenticator,
                 authentication_key: client_keypair,
                 peer_public_key: Some(server_keypair.public_key()),
                 additional_data: vec![],

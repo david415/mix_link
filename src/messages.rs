@@ -18,6 +18,7 @@ extern crate snow;
 extern crate ecdh_wrapper;
 
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::HashMap;
 
 use subtle::ConstantTimeEq;
 use byteorder::{ByteOrder, BigEndian};
@@ -80,8 +81,49 @@ pub struct PeerCredentials {
     pub public_key: PublicKey,
 }
 
-pub trait PeerAuthenticator {
-    fn is_peer_valid(&self, peer_credentials: &PeerCredentials) -> bool;
+#[derive(PartialEq, Debug, Clone, Default)]
+pub struct ServerAuthenticatorState{
+    pub mix_map: HashMap<PublicKey, bool>,
+}
+
+#[derive(PartialEq, Debug, Clone, Default)]
+pub struct ProviderAuthenticatorState{
+    pub mix_map: HashMap<PublicKey, bool>,
+    pub client_map: HashMap<PublicKey, bool>,
+}
+
+#[derive(PartialEq, Debug, Clone, Default)]
+pub struct ClientAuthenticatorState{
+    pub peer_public_key: PublicKey,
+}
+
+
+/// PeerAuthenticator is used to authenticate wire protocol sessions.
+#[derive(PartialEq, Debug, Clone)]
+pub enum PeerAuthenticator {
+    /// An authenticator to be used on a server.
+    Server(ServerAuthenticatorState),
+
+    /// An authenticator to be used on a Provider.
+    Provider(ProviderAuthenticatorState),
+
+    /// An authenticator to be used on a client.
+    Client(ClientAuthenticatorState),
+}
+
+impl PeerAuthenticator {
+    pub fn is_peer_valid(&self, peer_credentials: &PeerCredentials) -> bool {
+        match *self {
+            PeerAuthenticator::Client(ref state) => state.peer_public_key.eq(&peer_credentials.public_key),
+            PeerAuthenticator::Server(ref state) => state.mix_map.get(&peer_credentials.public_key).is_some(),
+            PeerAuthenticator::Provider(ref state) => {
+                if state.mix_map.get(&peer_credentials.public_key).is_some() {
+                    return true
+                }
+                return state.client_map.get(&peer_credentials.public_key).is_some();
+            },
+        }
+    }
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -98,7 +140,7 @@ pub enum State {
 
 /// A session configuration type.
 pub struct SessionConfig {
-    pub authenticator: Box<PeerAuthenticator>,
+    pub authenticator: PeerAuthenticator,
     pub authentication_key: PrivateKey,
     pub peer_public_key: Option<PublicKey>,
     pub additional_data: Vec<u8>,
@@ -109,7 +151,7 @@ pub struct MessageFactory {
     session: snow::Session,
     state: State,
     additional_data: Vec<u8>,
-    authenticator: Box<PeerAuthenticator>,
+    authenticator: PeerAuthenticator,
     is_initiator: bool,
     clock_skew: u64,
     peer_credentials: Option<Box<PeerCredentials>>,
@@ -390,7 +432,7 @@ mod tests {
     use self::rand::os::OsRng;
     use ecdh_wrapper::PrivateKey;
     use super::super::sphinxcrypto::constants::USER_FORWARD_PAYLOAD_SIZE;
-    use super::{PeerAuthenticator, PeerCredentials};
+    use super::{PeerAuthenticator, ProviderAuthenticatorState};
     use super::super::commands::Command;
     use super::*;
 
@@ -405,22 +447,19 @@ mod tests {
         assert_eq!(auth1, auth2);
     }
 
-    struct NaiveAuthenticator {}
-    impl PeerAuthenticator for NaiveAuthenticator {
-        fn is_peer_valid(&self, _peer_credentials: &PeerCredentials) -> bool {
-            return true;
-        }
-    }
-
     #[test]
     fn message_handshake_test() {
         let mut r = OsRng::new().expect("failure to create an OS RNG");
 
-        // server
-        let server_authenticator = NaiveAuthenticator{};
         let server_keypair = PrivateKey::generate(&mut r);
+        let client_keypair = PrivateKey::generate(&mut r);
+
+        // server
+        let mut provider_auth = ProviderAuthenticatorState::default();
+        provider_auth.client_map.insert(client_keypair.public_key(), true);
+        let provider_authenticator = PeerAuthenticator::Provider(provider_auth);
         let server_config = SessionConfig {
-            authenticator: Box::new(server_authenticator),
+            authenticator: provider_authenticator,
             authentication_key: server_keypair,
             peer_public_key: None,
             additional_data: vec![],
@@ -428,10 +467,11 @@ mod tests {
         let mut server_session = MessageFactory::new(server_config, false).unwrap();
 
         // client
-        let client_authenticator = NaiveAuthenticator{};
-        let client_keypair = PrivateKey::generate(&mut r);
+        let mut client_auth = ClientAuthenticatorState::default();
+        client_auth.peer_public_key = server_keypair.public_key();
+        let client_authenticator = PeerAuthenticator::Client(client_auth);
         let client_config = SessionConfig {
-            authenticator: Box::new(client_authenticator),
+            authenticator: client_authenticator,
             authentication_key: client_keypair,
             peer_public_key: Some(server_keypair.public_key()),
             additional_data: vec![],
