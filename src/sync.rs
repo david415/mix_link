@@ -32,7 +32,8 @@ const MAX_MSG_LEN: usize = 1_048_576;
 
 /// A mixnet link layer protocol session.
 pub struct Session {
-    tcp_stream: Option<TcpStream>,
+    reader_tcp_stream: Option<TcpStream>,
+    writer_tcp_stream: Option<TcpStream>,
     is_initiator: bool,
     message_factory: MessageFactory,
 }
@@ -41,45 +42,44 @@ impl Session {
 
     pub fn new(cfg: SessionConfig, is_initiator: bool) -> Result<Session, HandshakeError> {
         Ok(Session{
-            tcp_stream: None,
+            writer_tcp_stream: None,
+            reader_tcp_stream: None,
             is_initiator,
             message_factory: MessageFactory::new(cfg, is_initiator)?,
         })
     }
 
     fn handshake(&mut self) -> Result<(), HandshakeError>{
+        let tcp_reader = self.reader_tcp_stream.as_mut().unwrap();
+        let tcp_writer = self.writer_tcp_stream.as_mut().unwrap();
         if self.is_initiator {
-            let tcp_stream = self.tcp_stream.as_mut().unwrap();
-
             // c -> s
             let client_handshake1 = self.message_factory.client_handshake1()?;
-            tcp_stream.write_all(&client_handshake1)?;
+            tcp_writer.write_all(&client_handshake1)?;
             self.message_factory.sent_client_handshake1();
 
             // s -> c
             let mut server_handshake1 = [0; NOISE_HANDSHAKE_MESSAGE2_SIZE];
-            tcp_stream.read_exact(&mut server_handshake1)?;
+            tcp_reader.read_exact(&mut server_handshake1)?;
             self.message_factory.received_server_handshake1(server_handshake1)?;
 
             // c -> s
             let client_handshake2 = self.message_factory.client_handshake2()?;
-            tcp_stream.write_all(&client_handshake2)?;
+            tcp_writer.write_all(&client_handshake2)?;
             self.message_factory.sent_client_handshake2();
         } else {
-            let tcp_stream = self.tcp_stream.as_mut().unwrap();
-
             // c -> s
             let mut client_handshake1 = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
-            tcp_stream.read_exact(&mut client_handshake1)?;
+            tcp_reader.read_exact(&mut client_handshake1)?;
             let server_handshake1 = self.message_factory.received_client_handshake1(client_handshake1).unwrap();
 
             // s -> c
-            tcp_stream.write_all(&server_handshake1)?;
+            tcp_writer.write_all(&server_handshake1)?;
             self.message_factory.sent_server_handshake1();
 
             // c -> s
             let mut client_handshake2 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
-            tcp_stream.read_exact(&mut client_handshake2)?;
+            tcp_reader.read_exact(&mut client_handshake2)?;
             self.message_factory.received_client_handshake2(client_handshake2).unwrap();
         }
         Ok(())
@@ -99,14 +99,17 @@ impl Session {
     }
         
     pub fn initialize(&mut self, tcp_stream: TcpStream) -> Result<(), HandshakeError>{
-        self.tcp_stream = Some(tcp_stream);
+        let reader_tcp_stream = tcp_stream.try_clone()?;
+        self.reader_tcp_stream = Some(reader_tcp_stream);
+        self.writer_tcp_stream = Some(tcp_stream);
         self.handshake()?;
         Ok(())
     }
 
     pub fn into_transport_mode(self) -> Result<Self, HandshakeError> {
         Ok(Self {
-            tcp_stream: self.tcp_stream,
+            reader_tcp_stream: self.reader_tcp_stream,
+            writer_tcp_stream: self.writer_tcp_stream,
             is_initiator: self.is_initiator,
             message_factory: self.message_factory.into_transport_mode()?,
         })
@@ -124,19 +127,19 @@ impl Session {
 
         // XXX https://github.com/mcginty/snow/issues/35
 
-        self.tcp_stream.as_mut().unwrap().write_all(&to_send)?;
+        self.writer_tcp_stream.as_mut().unwrap().write_all(&to_send)?;
         Ok(())
     }
 
     pub fn recv_command(&mut self) -> Result<Command, ReceiveMessageError> {
         // Read, decrypt and parse the ciphertext header.
         let mut header_ciphertext = vec![0u8; MAC_LEN + 4];
-        self.tcp_stream.as_mut().unwrap().read_exact(&mut header_ciphertext)?;
+        self.reader_tcp_stream.as_mut().unwrap().read_exact(&mut header_ciphertext)?;
         let ct_len = self.message_factory.decrypt_message_header(&header_ciphertext.to_vec())?;
 
         // Read and decrypt the ciphertext.
         let mut ct = vec![0u8; ct_len as usize];
-        self.tcp_stream.as_mut().unwrap().read_exact(&mut ct)?;
+        self.reader_tcp_stream.as_mut().unwrap().read_exact(&mut ct)?;
         let body = self.message_factory.decrypt_message(&ct)?;
 
         // XXX https://github.com/mcginty/snow/issues/35
@@ -146,7 +149,8 @@ impl Session {
 
     pub fn close(&mut self) {
         // XXX https://github.com/mcginty/snow/issues/35
-        let _ = self.tcp_stream.as_mut().unwrap().shutdown(Shutdown::Both);
+        let _ = self.reader_tcp_stream.as_mut().unwrap().shutdown(Shutdown::Both);
+        let _ = self.writer_tcp_stream.as_mut().unwrap().shutdown(Shutdown::Both);
     }
 
     pub fn peer_credentials(&self) -> &PeerCredentials {

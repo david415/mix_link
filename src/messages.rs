@@ -139,6 +139,7 @@ pub enum State {
 }
 
 /// A session configuration type.
+#[derive(PartialEq, Debug, Clone)]
 pub struct SessionConfig {
     pub authenticator: PeerAuthenticator,
     pub authentication_key: PrivateKey,
