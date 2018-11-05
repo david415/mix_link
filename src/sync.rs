@@ -181,8 +181,8 @@ mod tests {
         let mut threads = vec![];
         let server_addr = "127.0.0.1:8000";
         let mut rng = OsRng::new().expect("failure to create an OS RNG");
-        let server_keypair = PrivateKey::generate(&mut rng);
-        let client_keypair = PrivateKey::generate(&mut rng);
+        let server_keypair = PrivateKey::generate(&mut rng).unwrap();
+        let client_keypair = PrivateKey::generate(&mut rng).unwrap();
 
         let mut provider_auth = ProviderAuthenticatorState::default();
         provider_auth.client_map.insert(client_keypair.public_key(), true);

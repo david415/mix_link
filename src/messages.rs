@@ -452,8 +452,8 @@ mod tests {
     fn message_handshake_test() {
         let mut r = OsRng::new().expect("failure to create an OS RNG");
 
-        let server_keypair = PrivateKey::generate(&mut r);
-        let client_keypair = PrivateKey::generate(&mut r);
+        let server_keypair = PrivateKey::generate(&mut r).unwrap();
+        let client_keypair = PrivateKey::generate(&mut r).unwrap();
 
         // server
         let mut provider_auth = ProviderAuthenticatorState::default();
