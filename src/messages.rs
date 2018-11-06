@@ -148,6 +148,7 @@ pub struct SessionConfig {
 }
 
 /// A cryptographic protocol message factory type.
+#[derive(Debug)]
 pub struct MessageFactory {
     session: snow::Session,
     state: State,

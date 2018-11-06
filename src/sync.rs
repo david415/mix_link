@@ -19,6 +19,7 @@ extern crate ecdh_wrapper;
 
 use std::net::{TcpStream, Shutdown};
 use std::io::prelude::*;
+use std::sync::{Arc, Mutex};
 
 use super::commands::{Command};
 use super::errors::{HandshakeError, ReceiveMessageError, SendMessageError};
@@ -35,52 +36,54 @@ pub struct Session {
     reader_tcp_stream: Option<TcpStream>,
     writer_tcp_stream: Option<TcpStream>,
     is_initiator: bool,
-    message_factory: MessageFactory,
+    header_factory: Option<MessageFactory>,
+    transport_factory: Option<Arc<Mutex<MessageFactory>>>,
 }
 
 impl Session {
-
     pub fn new(cfg: SessionConfig, is_initiator: bool) -> Result<Session, HandshakeError> {
         Ok(Session{
             writer_tcp_stream: None,
             reader_tcp_stream: None,
             is_initiator,
-            message_factory: MessageFactory::new(cfg, is_initiator)?,
+            header_factory: Some(MessageFactory::new(cfg, is_initiator)?),
+            transport_factory: None,
         })
     }
 
     fn handshake(&mut self) -> Result<(), HandshakeError>{
         let tcp_reader = self.reader_tcp_stream.as_mut().unwrap();
         let tcp_writer = self.writer_tcp_stream.as_mut().unwrap();
+        let factory = self.header_factory.as_mut().unwrap();
         if self.is_initiator {
             // c -> s
-            let client_handshake1 = self.message_factory.client_handshake1()?;
+            let client_handshake1 = factory.client_handshake1()?;
             tcp_writer.write_all(&client_handshake1)?;
-            self.message_factory.sent_client_handshake1();
+            factory.sent_client_handshake1();
 
             // s -> c
             let mut server_handshake1 = [0; NOISE_HANDSHAKE_MESSAGE2_SIZE];
             tcp_reader.read_exact(&mut server_handshake1)?;
-            self.message_factory.received_server_handshake1(server_handshake1)?;
+            factory.received_server_handshake1(server_handshake1)?;
 
             // c -> s
-            let client_handshake2 = self.message_factory.client_handshake2()?;
+            let client_handshake2 = factory.client_handshake2()?;
             tcp_writer.write_all(&client_handshake2)?;
-            self.message_factory.sent_client_handshake2();
+            factory.sent_client_handshake2();
         } else {
             // c -> s
             let mut client_handshake1 = [0u8; NOISE_HANDSHAKE_MESSAGE1_SIZE];
             tcp_reader.read_exact(&mut client_handshake1)?;
-            let server_handshake1 = self.message_factory.received_client_handshake1(client_handshake1).unwrap();
+            let server_handshake1 = factory.received_client_handshake1(client_handshake1).unwrap();
 
             // s -> c
             tcp_writer.write_all(&server_handshake1)?;
-            self.message_factory.sent_server_handshake1();
+            factory.sent_server_handshake1();
 
             // c -> s
             let mut client_handshake2 = [0u8; NOISE_HANDSHAKE_MESSAGE3_SIZE];
             tcp_reader.read_exact(&mut client_handshake2)?;
-            self.message_factory.received_client_handshake2(client_handshake2).unwrap();
+            factory.received_client_handshake2(client_handshake2).unwrap();
         }
         Ok(())
     }
@@ -106,12 +109,13 @@ impl Session {
         Ok(())
     }
 
-    pub fn into_transport_mode(self) -> Result<Self, HandshakeError> {
+    pub fn into_transport_mode(mut self) -> Result<Self, HandshakeError> {
         Ok(Self {
             reader_tcp_stream: self.reader_tcp_stream,
             writer_tcp_stream: self.writer_tcp_stream,
             is_initiator: self.is_initiator,
-            message_factory: self.message_factory.into_transport_mode()?,
+            header_factory: None,
+            transport_factory: Some(Arc::new(Mutex::new(self.header_factory.take().unwrap().into_transport_mode()?))),
         })
     }
 
@@ -123,7 +127,7 @@ impl Session {
         }
 
         let mut to_send = vec![];
-        to_send.extend(self.message_factory.encrypt_message(&ct)?);
+        to_send.extend(self.transport_factory.as_mut().unwrap().lock().unwrap().encrypt_message(&ct)?);
 
         // XXX https://github.com/mcginty/snow/issues/35
 
@@ -135,12 +139,12 @@ impl Session {
         // Read, decrypt and parse the ciphertext header.
         let mut header_ciphertext = vec![0u8; MAC_LEN + 4];
         self.reader_tcp_stream.as_mut().unwrap().read_exact(&mut header_ciphertext)?;
-        let ct_len = self.message_factory.decrypt_message_header(&header_ciphertext.to_vec())?;
+        let ct_len = self.transport_factory.as_mut().unwrap().lock().unwrap().decrypt_message_header(&header_ciphertext.to_vec())?;
 
         // Read and decrypt the ciphertext.
         let mut ct = vec![0u8; ct_len as usize];
         self.reader_tcp_stream.as_mut().unwrap().read_exact(&mut ct)?;
-        let body = self.message_factory.decrypt_message(&ct)?;
+        let body = self.transport_factory.as_mut().unwrap().lock().unwrap().decrypt_message(&ct)?;
 
         // XXX https://github.com/mcginty/snow/issues/35
 
@@ -154,11 +158,11 @@ impl Session {
     }
 
     pub fn peer_credentials(&self) -> &PeerCredentials {
-        self.message_factory.peer_credentials()
+        self.header_factory.as_ref().unwrap().peer_credentials()
     }
 
     pub fn clock_skew(&self) -> u64 {
-        self.message_factory.clock_skew()
+        self.transport_factory.as_ref().unwrap().lock().unwrap().clock_skew()
     }
 }
 
@@ -210,7 +214,6 @@ mod tests {
                 match connection {
                     Ok(mut stream) => {
                         session.initialize(stream).unwrap();
-                        println!("server handshake completed!");
 
                         session = session.into_transport_mode().unwrap();
                         session.finalize_handshake().unwrap();
