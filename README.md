@@ -2,14 +2,14 @@
 # mix_link
 [![](https://travis-ci.org/david415/mix_link.png?branch=master)](https://www.travis-ci.org/david415/mix_link) [![](https://img.shields.io/crates/v/mix_link.svg)](https://crates.io/crates/mix_link) [![](https://docs.rs/mix_link/badge.svg)](https://docs.rs/mix_link/)
 
+
 This crate provides a Noise Protocol Framework based cryptographic
 link layer wire protocol for constructing mix networks.
 
 
 # warning
 
-This code has not been formally audited by a cryptographer. It
-therefore should not be considered safe or correct. Use it at your own
+This code has not been formally audited. Use it at your own
 risk!
 
 
