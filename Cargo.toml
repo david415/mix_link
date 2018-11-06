@@ -1,7 +1,7 @@
 [package]
 name = "mix_link"
-version = "0.0.2"
-authors = ["David Stainton <dstainton415@gmail.com>"]
+version = "0.0.3"
+authors = ["David Stainton <dawuud@riseup.net>"]
 description = "message oriented noise based cryptographic link layer for mixnets"
 keywords = ["cryptography", "noise", "network", "mixnet", "link-layer"]
 license = "AGPL-3.0-only"
