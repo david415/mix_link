@@ -40,6 +40,18 @@ pub struct Session {
     transport_factory: Option<Arc<Mutex<MessageFactory>>>,
 }
 
+impl Clone for Session {
+    fn clone(&self) -> Session {
+        Session {
+            reader_tcp_stream: Some(self.reader_tcp_stream.as_ref().unwrap().try_clone().unwrap()),
+            writer_tcp_stream: Some(self.writer_tcp_stream.as_ref().unwrap().try_clone().unwrap()),
+            is_initiator: self.is_initiator,
+            header_factory: None,
+            transport_factory: self.transport_factory.clone(),
+        }
+    }
+}
+
 impl Session {
     pub fn new(cfg: SessionConfig, is_initiator: bool) -> Result<Session, HandshakeError> {
         Ok(Session{
@@ -171,7 +183,7 @@ mod tests {
     extern crate rand;
     extern crate ecdh_wrapper;
 
-    use std::thread;
+    use std::{thread, time};
     use std::time::Duration;
     use std::net::TcpListener;
     use std::net::TcpStream;
@@ -179,6 +191,8 @@ mod tests {
     use ecdh_wrapper::PrivateKey;
     use super::{Session, SessionConfig};
     use super::super::messages::{PeerAuthenticator, ProviderAuthenticatorState, ClientAuthenticatorState};
+    use super::super::commands::{Command};
+
 
     #[test]
     fn handshake_test() {
@@ -244,6 +258,118 @@ mod tests {
             session = session.into_transport_mode().unwrap();
             session.finalize_handshake().unwrap();
             session.close();
+        }));
+
+        // wait for spawned threads to exit
+        for t in threads {
+            let _ = t.join();
+        }
+    }
+
+    #[test]
+    fn reader_writer_thread_test() {
+        let mut threads = vec![];
+        let server_addr = "127.0.0.1:8001";
+        let mut rng = OsRng::new().expect("failure to create an OS RNG");
+        let server_keypair = PrivateKey::generate(&mut rng).unwrap();
+        let client_keypair = PrivateKey::generate(&mut rng).unwrap();
+
+        let mut provider_auth = ProviderAuthenticatorState::default();
+        provider_auth.client_map.insert(client_keypair.public_key(), true);
+        let provider_authenticator = PeerAuthenticator::Provider(provider_auth);
+
+        let mut client_auth = ClientAuthenticatorState::default();
+        client_auth.peer_public_key = server_keypair.public_key();
+        let client_authenticator = PeerAuthenticator::Client(client_auth);
+
+        // server listener
+        threads.push(thread::spawn(move|| {
+            let listener = TcpListener::bind(server_addr.clone()).expect("could not start server");
+
+            // server
+            let server_config = SessionConfig {
+                authenticator: provider_authenticator,
+                authentication_key: server_keypair,
+                peer_public_key: None,
+                additional_data: vec![],
+            };
+            let mut session = Session::new(server_config, false).unwrap();
+
+            for connection in listener.incoming() {
+                match connection {
+                    Ok(mut stream) => {
+                        session.initialize(stream).unwrap();
+                        session = session.into_transport_mode().unwrap();
+                        session.finalize_handshake().unwrap();
+
+                        let mut reader_session = session.clone();
+                        let mut session_threads = vec![];
+                        session_threads.push(thread::spawn(move|| {
+                            loop {
+                                if let Ok(cmd) = reader_session.recv_command() {
+                                    println!("server received command {:?}", cmd);
+                                } else {
+                                    reader_session.close();
+                                    return
+                                }
+                            }
+                        }));
+                        session_threads.push(thread::spawn(move|| {
+                            loop {
+                                let cmd = Command::NoOp{};
+                                println!("server send NoOp");
+                                match session.send_command(&cmd) {
+                                    Ok(_) => {},
+                                    Err(_) => return,
+                                }
+                                thread::sleep(time::Duration::from_secs(2));
+                            }
+                        }));
+                        for t in session_threads {
+                            let _ = t.join();
+                        }
+                        // XXX
+                        //session.close();
+                        return
+                    }
+                    Err(e) => { println!("connection failed {}", e); }
+                }
+            }
+        }));
+
+        // client dialer
+        threads.push(thread::spawn(move|| {
+            thread::sleep(Duration::from_secs(1));
+            // client
+            let client_config = SessionConfig {
+                authenticator: client_authenticator,
+                authentication_key: client_keypair,
+                peer_public_key: Some(server_keypair.public_key()),
+                additional_data: vec![],
+            };
+            let mut session = Session::new(client_config, true).unwrap();
+
+            let stream = TcpStream::connect(server_addr.clone()).expect("connection failed");
+            session.initialize(stream).unwrap();
+            session = session.into_transport_mode().unwrap();
+            session.finalize_handshake().unwrap();
+            println!("client handshake completed!");
+
+            let mut acc = 0;
+            loop {
+                match session.recv_command() {
+                    Ok(_cmd) => {
+                        if acc == 3 {
+                            session.close();
+                            return
+                        }
+                        println!("client received command, sending NoOp response");
+                        session.send_command(&Command::NoOp{}).unwrap();
+                        acc += 1;
+                    },
+                    Err(e) => println!("client receive command err: {}", e),
+                }
+            }
         }));
 
         // wait for spawned threads to exit
