@@ -210,7 +210,8 @@ mod tests {
         client_auth.peer_public_key = server_keypair.public_key();
         let client_authenticator = PeerAuthenticator::Client(client_auth);
 
-        
+        let server_keypair_clone = server_keypair.clone();
+
         // server listener
         threads.push(thread::spawn(move|| {
             let listener = TcpListener::bind(server_addr.clone()).expect("could not start server");
@@ -246,7 +247,7 @@ mod tests {
             let client_config = SessionConfig {
                 authenticator: client_authenticator,
                 authentication_key: client_keypair,
-                peer_public_key: Some(server_keypair.public_key()),
+                peer_public_key: Some(server_keypair_clone.public_key()),
                 additional_data: vec![],
             };
             let mut session = Session::new(client_config, true).unwrap();
@@ -281,6 +282,8 @@ mod tests {
         let mut client_auth = ClientAuthenticatorState::default();
         client_auth.peer_public_key = server_keypair.public_key();
         let client_authenticator = PeerAuthenticator::Client(client_auth);
+
+        let server_keypair_clone = server_keypair.clone();
 
         // server listener
         threads.push(thread::spawn(move|| {
@@ -344,7 +347,7 @@ mod tests {
             let client_config = SessionConfig {
                 authenticator: client_authenticator,
                 authentication_key: client_keypair,
-                peer_public_key: Some(server_keypair.public_key()),
+                peer_public_key: Some(server_keypair_clone.public_key()),
                 additional_data: vec![],
             };
             let mut session = Session::new(client_config, true).unwrap();

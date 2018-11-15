@@ -462,7 +462,7 @@ mod tests {
         let provider_authenticator = PeerAuthenticator::Provider(provider_auth);
         let server_config = SessionConfig {
             authenticator: provider_authenticator,
-            authentication_key: server_keypair,
+            authentication_key: server_keypair.clone(),
             peer_public_key: None,
             additional_data: vec![],
         };
