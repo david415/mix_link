@@ -10,7 +10,7 @@ license = "AGPL-3.0-only"
 snow = "0.4.0"
 ecdh_wrapper = "0.0.7"
 byteorder = "1.2.2"
-sphinxcrypto = "0.0.13"
+sphinxcrypto = "0.0.15"
 
 [dependencies.subtle]
 version = "1"
