@@ -38,7 +38,7 @@ PQ hybrid forward secrecy mode via New Hope Simple.
 To import `mix_link`, add the following to the dependencies section of
 your project's `Cargo.toml`:
 ```toml
-mix_link = "^0.0.3"
+mix_link = "^0.0.4"
 ```
 Then import the crate as:
 ```rust,no_run
