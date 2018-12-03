@@ -90,6 +90,8 @@ pub struct ServerAuthenticatorState{
 pub struct ProviderAuthenticatorState{
     pub mix_map: HashMap<PublicKey, bool>,
     pub client_map: HashMap<PublicKey, bool>,
+    pub from_client: bool,
+    pub from_mix: bool,
 }
 
 #[derive(PartialEq, Debug, Clone, Default)]
@@ -112,16 +114,29 @@ pub enum PeerAuthenticator {
 }
 
 impl PeerAuthenticator {
-    pub fn is_peer_valid(&self, peer_credentials: &PeerCredentials) -> bool {
+    pub fn is_peer_valid(&mut self, peer_credentials: &PeerCredentials) -> bool {
         match *self {
             PeerAuthenticator::Client(ref state) => state.peer_public_key.eq(&peer_credentials.public_key),
             PeerAuthenticator::Server(ref state) => state.mix_map.get(&peer_credentials.public_key).is_some(),
-            PeerAuthenticator::Provider(ref state) => {
+            PeerAuthenticator::Provider(ref mut state) => {
                 if state.mix_map.get(&peer_credentials.public_key).is_some() {
+                    state.from_mix = true;
                     return true
                 }
-                return state.client_map.get(&peer_credentials.public_key).is_some();
+                if state.client_map.get(&peer_credentials.public_key).is_some() {
+                    state.from_client = true;
+                    return true
+                }
+                return false
             },
+        }
+    }
+
+    pub fn is_peer_client(&self) -> bool {
+        match *self {
+            PeerAuthenticator::Client(ref _state) => return false,
+            PeerAuthenticator::Server(ref _state) => return false,
+            PeerAuthenticator::Provider(ref state) => return state.from_client,
         }
     }
 }
@@ -149,18 +164,18 @@ pub struct SessionConfig {
 
 /// A cryptographic protocol message factory type.
 #[derive(Debug)]
-pub struct MessageFactory {
+pub struct MessageBuilder {
     session: snow::Session,
     state: State,
     additional_data: Vec<u8>,
-    authenticator: PeerAuthenticator,
+    pub authenticator: PeerAuthenticator,
     is_initiator: bool,
     clock_skew: u64,
     peer_credentials: Option<Box<PeerCredentials>>,
 }
 
-impl MessageFactory {
-    pub fn new(config: SessionConfig, is_initiator: bool) -> Result<MessageFactory, HandshakeError> {
+impl MessageBuilder {
+    pub fn new(config: SessionConfig, is_initiator: bool) -> Result<MessageBuilder, HandshakeError> {
         let noise_params;
         match NOISE_PARAMS.parse() {
             Ok(x) => {
@@ -181,7 +196,7 @@ impl MessageFactory {
                     Ok(x) => x,
                     Err(_) => return Err(HandshakeError::SessionCreateError),
                 };
-            return Ok(MessageFactory {
+            return Ok(MessageBuilder {
                 state: State::Init,
                 additional_data: config.additional_data,
                 authenticator: config.authenticator,
@@ -198,7 +213,7 @@ impl MessageFactory {
                 Ok(x) => x,
                 Err(_) => return Err(HandshakeError::SessionCreateError),
             };
-        Ok(MessageFactory {
+        Ok(MessageBuilder {
             state: State::Init,
             additional_data: config.additional_data,
             authenticator: config.authenticator,
@@ -466,7 +481,7 @@ mod tests {
             peer_public_key: None,
             additional_data: vec![],
         };
-        let mut server_session = MessageFactory::new(server_config, false).unwrap();
+        let mut server_session = MessageBuilder::new(server_config, false).unwrap();
 
         // client
         let mut client_auth = ClientAuthenticatorState::default();
@@ -478,7 +493,7 @@ mod tests {
             peer_public_key: Some(server_keypair.public_key()),
             additional_data: vec![],
         };
-        let mut client_session = MessageFactory::new(client_config, true).unwrap();
+        let mut client_session = MessageBuilder::new(client_config, true).unwrap();
 
         // handshake
         // c -> s

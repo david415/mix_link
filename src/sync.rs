@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 
 use super::commands::{Command};
 use super::errors::{HandshakeError, ReceiveMessageError, SendMessageError};
-use super::messages::{MessageFactory, SessionConfig, PeerCredentials};
+use super::messages::{MessageBuilder, SessionConfig, PeerCredentials};
 use super::constants::{NOISE_HANDSHAKE_MESSAGE1_SIZE, NOISE_HANDSHAKE_MESSAGE2_SIZE,
                        NOISE_HANDSHAKE_MESSAGE3_SIZE};
 
@@ -36,8 +36,8 @@ pub struct Session {
     reader_tcp_stream: Option<TcpStream>,
     writer_tcp_stream: Option<TcpStream>,
     is_initiator: bool,
-    header_factory: Option<MessageFactory>,
-    transport_factory: Option<Arc<Mutex<MessageFactory>>>,
+    handshake_builder: Option<MessageBuilder>,
+    transport_builder: Option<Arc<Mutex<MessageBuilder>>>,
 }
 
 impl Clone for Session {
@@ -46,8 +46,8 @@ impl Clone for Session {
             reader_tcp_stream: Some(self.reader_tcp_stream.as_ref().unwrap().try_clone().unwrap()),
             writer_tcp_stream: Some(self.writer_tcp_stream.as_ref().unwrap().try_clone().unwrap()),
             is_initiator: self.is_initiator,
-            header_factory: None,
-            transport_factory: self.transport_factory.clone(),
+            handshake_builder: None,
+            transport_builder: self.transport_builder.clone(),
         }
     }
 }
@@ -58,15 +58,15 @@ impl Session {
             writer_tcp_stream: None,
             reader_tcp_stream: None,
             is_initiator,
-            header_factory: Some(MessageFactory::new(cfg, is_initiator)?),
-            transport_factory: None,
+            handshake_builder: Some(MessageBuilder::new(cfg, is_initiator)?),
+            transport_builder: None,
         })
     }
 
     fn handshake(&mut self) -> Result<(), HandshakeError>{
         let tcp_reader = self.reader_tcp_stream.as_mut().unwrap();
         let tcp_writer = self.writer_tcp_stream.as_mut().unwrap();
-        let factory = self.header_factory.as_mut().unwrap();
+        let factory = self.handshake_builder.as_mut().unwrap();
         if self.is_initiator {
             // c -> s
             let client_handshake1 = factory.client_handshake1()?;
@@ -126,8 +126,8 @@ impl Session {
             reader_tcp_stream: self.reader_tcp_stream,
             writer_tcp_stream: self.writer_tcp_stream,
             is_initiator: self.is_initiator,
-            header_factory: None,
-            transport_factory: Some(Arc::new(Mutex::new(self.header_factory.take().unwrap().into_transport_mode()?))),
+            handshake_builder: None,
+            transport_builder: Some(Arc::new(Mutex::new(self.handshake_builder.take().unwrap().into_transport_mode()?))),
         })
     }
 
@@ -139,7 +139,7 @@ impl Session {
         }
 
         let mut to_send = vec![];
-        to_send.extend(self.transport_factory.as_mut().unwrap().lock().unwrap().encrypt_message(&ct)?);
+        to_send.extend(self.transport_builder.as_mut().unwrap().lock().unwrap().encrypt_message(&ct)?);
 
         // XXX https://github.com/mcginty/snow/issues/35
 
@@ -151,12 +151,12 @@ impl Session {
         // Read, decrypt and parse the ciphertext header.
         let mut header_ciphertext = vec![0u8; MAC_LEN + 4];
         self.reader_tcp_stream.as_mut().unwrap().read_exact(&mut header_ciphertext)?;
-        let ct_len = self.transport_factory.as_mut().unwrap().lock().unwrap().decrypt_message_header(&header_ciphertext.to_vec())?;
+        let ct_len = self.transport_builder.as_mut().unwrap().lock().unwrap().decrypt_message_header(&header_ciphertext.to_vec())?;
 
         // Read and decrypt the ciphertext.
         let mut ct = vec![0u8; ct_len as usize];
         self.reader_tcp_stream.as_mut().unwrap().read_exact(&mut ct)?;
-        let body = self.transport_factory.as_mut().unwrap().lock().unwrap().decrypt_message(&ct)?;
+        let body = self.transport_builder.as_mut().unwrap().lock().unwrap().decrypt_message(&ct)?;
 
         // XXX https://github.com/mcginty/snow/issues/35
 
@@ -170,11 +170,17 @@ impl Session {
     }
 
     pub fn peer_credentials(&self) -> &PeerCredentials {
-        self.header_factory.as_ref().unwrap().peer_credentials()
+        self.handshake_builder.as_ref().unwrap().peer_credentials()
     }
 
     pub fn clock_skew(&self) -> u64 {
-        self.transport_factory.as_ref().unwrap().lock().unwrap().clock_skew()
+        self.transport_builder.as_ref().unwrap().lock().unwrap().clock_skew()
+    }
+
+    pub fn from_client(&self) -> bool {
+        assert!(!self.is_initiator);
+        assert!(self.transport_builder.is_some());
+        self.transport_builder.as_ref().unwrap().lock().unwrap().authenticator.is_peer_client()
     }
 }
 
